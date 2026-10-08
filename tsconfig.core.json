@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* core/ must stay pure (D-06): no DOM types available at all. */
+    "lib": ["ES2022"]
+  },
+  "include": ["src/core"]
+}
