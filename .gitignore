@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright-mcp/
+*.log
+.DS_Store
