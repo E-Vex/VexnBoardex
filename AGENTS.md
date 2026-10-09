@@ -18,13 +18,15 @@ decisions), 4 (architecture) and 5 (invariants) are **binding**.
 
 ## Before reporting any task done
 
-Run `npm run check` (lint + typecheck + tests) and paste the real output.
+Run `npm run check:all` (check + e2e) and paste the real output.
 Evidence over claims.
 
 ## Commits
 
 Small and focused, one logical change each, prefixed with the task id:
 `[T-003] feat: screenToWorld`. Never one giant commit.
+Branch policy: one branch per task, named `task/T-xxx-slug`; never commit
+to `main` — the Owner merges PRs (no squash).
 
 ## Report format (Implementer → Planner) — PLAN §2
 

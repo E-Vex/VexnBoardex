@@ -9,8 +9,18 @@ It is a free-form board for thinking — idea → project → tasks → done —
 nvm use          # Node LTS pinned in .nvmrc
 npm install
 npm run dev      # start the dev server
-npm run check    # lint + typecheck + tests
+npm run check    # lint + typecheck + unit tests (fast, no browser)
 npm run build    # production build
+```
+
+## E2E (Playwright)
+
+Browser smoke tests for the canvas host live in `e2e/` (Chromium only):
+
+```bash
+npx playwright install chromium   # one-time browser download
+npm run test:e2e                  # starts the dev server itself (port 5173)
+npm run check:all                 # npm run check + npm run test:e2e
 ```
 
 ## Docs
