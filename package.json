@@ -17,6 +17,8 @@
     "check": "npm run lint && npm run typecheck && npm run test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.4",
     "eslint": "^10.12.0",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
