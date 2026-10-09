@@ -57,4 +57,23 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // e2e tests are BLACK BOX (T-002 brief R2): they may not import from
+    // src/ — they only talk to the running page through Playwright.
+    files: ['e2e/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['../src/**', '../src', 'src/**'],
+              message:
+                'e2e tests must stay black-box: no imports from src/ (see T-002 R2).',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
