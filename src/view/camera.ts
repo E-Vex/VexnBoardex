@@ -16,7 +16,7 @@
  * comes back unchanged. devicePixelRatio is handled only in the canvas host.
  */
 
-import type { Point } from '../core/geometry';
+import type { Point, Rect } from '../core/geometry';
 
 export type Camera = { x: number; y: number; zoom: number };
 
@@ -118,4 +118,18 @@ export function zoomByFactorAt(
     return cam;
   }
   return zoomAt(cam, screenPoint, cam.zoom * factor);
+}
+
+/**
+ * The world-space rectangle visible in a viewport of `width` × `height`
+ * CSS pixels: its top-left corner is the camera's (x, y) — the world point
+ * at the viewport's top-left — and its size is the viewport size divided
+ * by the zoom.
+ */
+export function visibleWorldRect(
+  cam: Camera,
+  width: number,
+  height: number,
+): Rect {
+  return { x: cam.x, y: cam.y, w: width / cam.zoom, h: height / cam.zoom };
 }

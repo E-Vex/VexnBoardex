@@ -8,6 +8,7 @@ import {
   clampZoom,
   panBy,
   screenToWorld,
+  visibleWorldRect,
   worldToScreen,
   zoomAt,
   zoomByFactorAt,
@@ -327,6 +328,36 @@ describe('immutability (brief R4.10)', () => {
     zoomAt(DEFAULT_CAMERA, { x: 50, y: 50 }, 8);
     zoomByFactorAt(DEFAULT_CAMERA, { x: 50, y: 50 }, 2);
     expect(DEFAULT_CAMERA).toEqual(before);
+  });
+});
+
+describe('visibleWorldRect (brief R4.8)', () => {
+  it('known value: cam {−50, 20, zoom 2}, 800×600 → {−50, 20, 400, 300}', () => {
+    const cam: Camera = { x: -50, y: 20, zoom: 2 };
+    expect(visibleWorldRect(cam, 800, 600)).toEqual({
+      x: -50,
+      y: 20,
+      w: 400,
+      h: 300,
+    });
+  });
+
+  it('corners agree with screenToWorld of the viewport corners', () => {
+    const rand = mulberry32(0x5eed07);
+    for (let i = 0; i < 100; i++) {
+      const cam = randomCamera(rand, 1e5);
+      const w = 200 + rand() * 2000;
+      const h = 200 + rand() * 2000;
+      const rect = visibleWorldRect(cam, w, h);
+      expectClosePoint(
+        { x: rect.x, y: rect.y },
+        screenToWorld(cam, { x: 0, y: 0 }),
+      );
+      expectClosePoint(
+        { x: rect.x + rect.w, y: rect.y + rect.h },
+        screenToWorld(cam, { x: w, y: h }),
+      );
+    }
   });
 });
 
