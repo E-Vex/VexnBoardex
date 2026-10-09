@@ -9,6 +9,8 @@ import {
   panBy,
   screenToWorld,
   worldToScreen,
+  zoomAt,
+  zoomByFactorAt,
   type Camera,
 } from './camera';
 
@@ -183,6 +185,148 @@ describe('panBy (brief R4.7)', () => {
     expectCloseCamera(panned, { x: 6, y: 18, zoom: 2 });
     expect(Object.isFrozen(cam)).toBe(true);
     expect(panned).not.toBe(cam);
+  });
+});
+
+describe('zoomAt — the anchor stays fixed (brief R4.3)', () => {
+  const rand = mulberry32(0x5eed03);
+
+  it('worldToScreen(zoomAt(cam, s, z), screenToWorld(cam, s)) = s', () => {
+    for (let i = 0; i < 200; i++) {
+      const cam = randomCamera(rand, 1e4);
+      const s = randomPoint(rand, 1e3);
+      const target = randomZoom(rand);
+      const zoomed = zoomAt(cam, s, target);
+      const anchor = screenToWorld(cam, s);
+      expectClosePoint(worldToScreen(zoomed, anchor), s);
+      expect(zoomed.zoom).toBe(clampZoom(target));
+    }
+  });
+});
+
+describe('zoomAt — clamping (brief R4.4)', () => {
+  const rand = mulberry32(0x5eed04);
+
+  it('requesting 100 clamps to MAX_ZOOM and keeps the cursor point fixed', () => {
+    for (let i = 0; i < 50; i++) {
+      const cam = randomCamera(rand, 1e4);
+      const s = randomPoint(rand, 1e3);
+      const zoomed = zoomAt(cam, s, 100);
+      expect(zoomed.zoom).toBe(MAX_ZOOM);
+      expectClosePoint(worldToScreen(zoomed, screenToWorld(cam, s)), s);
+    }
+  });
+
+  it('requesting 0.001 clamps to MIN_ZOOM and keeps the cursor point fixed', () => {
+    for (let i = 0; i < 50; i++) {
+      const cam = randomCamera(rand, 1e4);
+      const s = randomPoint(rand, 1e3);
+      const zoomed = zoomAt(cam, s, 0.001);
+      expect(zoomed.zoom).toBe(MIN_ZOOM);
+      expectClosePoint(worldToScreen(zoomed, screenToWorld(cam, s)), s);
+    }
+  });
+});
+
+describe('zoomAt — already at the bounds (brief R4.5)', () => {
+  const rand = mulberry32(0x5eed05);
+
+  it('zooming in further at MAX_ZOOM leaves the camera equal within tolerance', () => {
+    for (let i = 0; i < 50; i++) {
+      const cam = randomCamera(rand, 1e4);
+      cam.zoom = MAX_ZOOM;
+      const s = randomPoint(rand, 1e3);
+      expectCloseCamera(zoomAt(cam, s, MAX_ZOOM * 4), cam);
+    }
+  });
+
+  it('zooming out further at MIN_ZOOM leaves the camera equal within tolerance', () => {
+    for (let i = 0; i < 50; i++) {
+      const cam = randomCamera(rand, 1e4);
+      cam.zoom = MIN_ZOOM;
+      const s = randomPoint(rand, 1e3);
+      expectCloseCamera(zoomAt(cam, s, MIN_ZOOM / 10), cam);
+    }
+  });
+});
+
+describe('zoomByFactorAt — reversibility (brief R4.6)', () => {
+  const rand = mulberry32(0x5eed06);
+
+  it('×2 then ×0.5 restores the camera when no clamping occurs', () => {
+    for (let i = 0; i < 200; i++) {
+      // zoom in [0.2, 3.5] so ×2 never clamps up and the intermediate
+      // zoom ×0.5 never clamps down.
+      const cam: Camera = {
+        x: (rand() * 2 - 1) * 1e4,
+        y: (rand() * 2 - 1) * 1e4,
+        zoom: Math.exp(
+          Math.log(0.2) + (Math.log(3.5) - Math.log(0.2)) * rand(),
+        ),
+      };
+      const s = randomPoint(rand, 1e3);
+      const zoomed = zoomByFactorAt(zoomByFactorAt(cam, s, 2), s, 0.5);
+      expectCloseCamera(zoomed, cam);
+    }
+  });
+});
+
+describe('non-finite inputs are no-ops (brief R4.9)', () => {
+  const cam: Camera = { x: 10, y: 20, zoom: 2 };
+  const s: Point = { x: 30, y: 40 };
+
+  it('zoomAt: non-finite point or zoom returns the camera unchanged', () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(zoomAt(cam, { x: bad, y: 1 }, 3)).toBe(cam);
+      expect(zoomAt(cam, { x: 1, y: bad }, 3)).toBe(cam);
+      expect(zoomAt(cam, s, bad)).toBe(cam);
+    }
+  });
+
+  it('zoomByFactorAt: factor NaN, ±Infinity or ≤ 0 returns it unchanged', () => {
+    for (const bad of [NaN, Infinity, -Infinity, 0, -1, -0.5]) {
+      expect(zoomByFactorAt(cam, s, bad)).toBe(cam);
+    }
+  });
+
+  it('results contain no NaN for valid inputs', () => {
+    for (const r of [
+      panBy(cam, 3, 4),
+      zoomAt(cam, s, 3),
+      zoomByFactorAt(cam, s, 1.5),
+    ]) {
+      expect(Number.isFinite(r.x)).toBe(true);
+      expect(Number.isFinite(r.y)).toBe(true);
+      expect(Number.isFinite(r.zoom)).toBe(true);
+    }
+  });
+});
+
+describe('immutability (brief R4.10)', () => {
+  it('frozen camera and point work; every function returns a new object', () => {
+    const cam: Camera = Object.freeze({ x: 100, y: 50, zoom: 2 });
+    const s: Point = Object.freeze({ x: 20, y: 10 });
+    const before = { ...cam };
+
+    const panned = panBy(cam, 10, 10);
+    const zoomed = zoomAt(cam, s, 4);
+    const factored = zoomByFactorAt(cam, s, 0.5);
+
+    expect(Object.isFrozen(cam)).toBe(true);
+    expect(cam).toEqual(before);
+    expect(panned).not.toBe(cam);
+    expect(zoomed).not.toBe(cam);
+    expect(factored).not.toBe(cam);
+    // Known value: anchor (110, 55), zoom 4 → (110 − 20/4, 55 − 10/4, 4).
+    expectCloseCamera(zoomed, { x: 105, y: 52.5, zoom: 4 });
+  });
+
+  it('DEFAULT_CAMERA is never mutated by the functions', () => {
+    const before = { ...DEFAULT_CAMERA };
+    panBy(DEFAULT_CAMERA, 100, 100);
+    zoomAt(DEFAULT_CAMERA, { x: 50, y: 50 }, 8);
+    zoomByFactorAt(DEFAULT_CAMERA, { x: 50, y: 50 }, 2);
+    expect(DEFAULT_CAMERA).toEqual(before);
   });
 });
 

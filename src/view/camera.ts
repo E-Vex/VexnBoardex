@@ -75,3 +75,47 @@ export function panBy(
     zoom: cam.zoom,
   };
 }
+
+/**
+ * Zoom to `newZoom` (clamped into [MIN_ZOOM, MAX_ZOOM]) while keeping the
+ * world point under `screenPoint` fixed — the anchor (PLAN D-08). The result
+ * satisfies worldToScreen(result, screenToWorld(cam, screenPoint)) =
+ * screenPoint. Non-finite camera, point or zoom input is a no-op: the camera
+ * comes back unchanged, never NaN.
+ */
+export function zoomAt(
+  cam: Camera,
+  screenPoint: Point,
+  newZoom: number,
+): Camera {
+  if (
+    !isUsableCamera(cam) ||
+    !Number.isFinite(screenPoint.x) ||
+    !Number.isFinite(screenPoint.y) ||
+    !Number.isFinite(newZoom)
+  ) {
+    return cam;
+  }
+  const z = clampZoom(newZoom);
+  const w = screenToWorld(cam, screenPoint);
+  return {
+    x: w.x - screenPoint.x / z,
+    y: w.y - screenPoint.y / z,
+    zoom: z,
+  };
+}
+
+/**
+ * Zoom by a multiplicative factor at `screenPoint`. `factor` must be finite
+ * and greater than 0; anything else is a no-op (camera unchanged, no NaN).
+ */
+export function zoomByFactorAt(
+  cam: Camera,
+  screenPoint: Point,
+  factor: number,
+): Camera {
+  if (!Number.isFinite(factor) || factor <= 0) {
+    return cam;
+  }
+  return zoomAt(cam, screenPoint, cam.zoom * factor);
+}
