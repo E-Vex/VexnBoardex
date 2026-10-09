@@ -19,7 +19,11 @@ const LAYER_ALLOW = {
 /** Build one `no-restricted-imports` override block for a layer directory. */
 function layerBlock(layer) {
   const allowed = LAYER_ALLOW[layer];
-  const otherLayers = Object.keys(LAYER_ALLOW).filter((l) => l !== layer);
+  // Only layers NOT in this layer's allowlist are blocked — e.g. view may
+  // import core (PLAN §4), so core must not appear in view's blocked list.
+  const blocked = Object.keys(LAYER_ALLOW).filter(
+    (l) => l !== layer && !allowed.includes(l),
+  );
   return {
     files: [`src/${layer}/**/*.ts`],
     rules: {
@@ -27,8 +31,8 @@ function layerBlock(layer) {
         'error',
         {
           patterns: [
-            // Block any import that reaches into another layer's folder…
-            ...otherLayers.map((l) => ({
+            // Block any import that reaches into a layer not allowed here…
+            ...blocked.map((l) => ({
               group: [`**/${l}/**`, `../${l}`, `../${l}/**`],
               message: `Layer "${layer}" may not import from "${l}". Allowed: ${allowed.length ? allowed.join(', ') : 'nothing'} (see PLAN §4).`,
             })),

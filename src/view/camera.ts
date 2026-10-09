@@ -16,6 +16,8 @@
  * comes back unchanged. devicePixelRatio is handled only in the canvas host.
  */
 
+import type { Point } from '../core/geometry';
+
 export type Camera = { x: number; y: number; zoom: number };
 
 export const MIN_ZOOM = 0.05;
@@ -25,4 +27,14 @@ export const DEFAULT_CAMERA: Camera = Object.freeze({ x: 0, y: 0, zoom: 1 });
 /** Clamp a zoom level into [MIN_ZOOM, MAX_ZOOM]. Input is assumed finite. */
 export function clampZoom(z: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+/** screen = (world − cam) × zoom, on each axis. */
+export function worldToScreen(cam: Camera, p: Point): Point {
+  return { x: (p.x - cam.x) * cam.zoom, y: (p.y - cam.y) * cam.zoom };
+}
+
+/** world = screen / zoom + cam, on each axis. */
+export function screenToWorld(cam: Camera, p: Point): Point {
+  return { x: p.x / cam.zoom + cam.x, y: p.y / cam.zoom + cam.y };
 }
