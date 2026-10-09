@@ -17,11 +17,11 @@
     "check": "npm run lint && npm run typecheck && npm run test"
   },
   "devDependencies": {
-    "eslint": "^9.39.5",
+    "eslint": "^10.12.0",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.71.1",
     "vite": "^8.3.4",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.3"
   }
 }
