@@ -1,0 +1,28 @@
+/**
+ * Camera — the single place where screen↔world conversion lives (I-02).
+ *
+ * Convention (PLAN D-07):
+ *   - 1 world unit = 1 CSS px at zoom 1; every value here is CSS pixels,
+ *     never device pixels.
+ *   - `(x, y)` is the world point at the viewport's top-left corner.
+ *   - screen = (world − cam) × zoom
+ *   - world  = screen / zoom + cam
+ *
+ * Worked example: cam = { x: 100, y: 50, zoom: 2 }, world = { x: 110, y: 60 }
+ *   screen = ((110 − 100) × 2, (60 − 50) × 2) = (20, 20)
+ *
+ * All functions are pure (PLAN D-18): they return new objects, never mutate
+ * their input, and treat non-finite numeric input as a no-op — the camera
+ * comes back unchanged. devicePixelRatio is handled only in the canvas host.
+ */
+
+export type Camera = { x: number; y: number; zoom: number };
+
+export const MIN_ZOOM = 0.05;
+export const MAX_ZOOM = 8;
+export const DEFAULT_CAMERA: Camera = Object.freeze({ x: 0, y: 0, zoom: 1 });
+
+/** Clamp a zoom level into [MIN_ZOOM, MAX_ZOOM]. Input is assumed finite. */
+export function clampZoom(z: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
