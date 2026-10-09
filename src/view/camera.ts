@@ -38,3 +38,40 @@ export function worldToScreen(cam: Camera, p: Point): Point {
 export function screenToWorld(cam: Camera, p: Point): Point {
   return { x: p.x / cam.zoom + cam.x, y: p.y / cam.zoom + cam.y };
 }
+
+/**
+ * True only for a usable camera: finite fields and a positive zoom.
+ * Backs the no-op rule (D-18) so camera math can never produce NaN.
+ */
+function isUsableCamera(cam: Camera): boolean {
+  return (
+    Number.isFinite(cam.x) &&
+    Number.isFinite(cam.y) &&
+    Number.isFinite(cam.zoom) &&
+    cam.zoom > 0
+  );
+}
+
+/**
+ * Pan by a pointer delta given in screen pixels: the content follows the
+ * pointer, so the camera moves by −d / zoom. Zoom is unchanged. Non-finite
+ * deltas are a no-op — the camera comes back unchanged, never NaN.
+ */
+export function panBy(
+  cam: Camera,
+  dxScreen: number,
+  dyScreen: number,
+): Camera {
+  if (
+    !isUsableCamera(cam) ||
+    !Number.isFinite(dxScreen) ||
+    !Number.isFinite(dyScreen)
+  ) {
+    return cam;
+  }
+  return {
+    x: cam.x - dxScreen / cam.zoom,
+    y: cam.y - dyScreen / cam.zoom,
+    zoom: cam.zoom,
+  };
+}

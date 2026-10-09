@@ -6,6 +6,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
   clampZoom,
+  panBy,
   screenToWorld,
   worldToScreen,
   type Camera,
@@ -26,6 +27,18 @@ function expectClosePoint(actual: Point, expected: Point): void {
   expect(
     closePoint(actual, expected),
     `expected (${actual.x}, ${actual.y}) ≈ (${expected.x}, ${expected.y})`,
+  ).toBe(true);
+}
+
+function closeCamera(a: Camera, b: Camera): boolean {
+  return close(a.x, b.x) && close(a.y, b.y) && close(a.zoom, b.zoom);
+}
+
+function expectCloseCamera(actual: Camera, expected: Camera): void {
+  expect(
+    closeCamera(actual, expected),
+    `expected (${actual.x}, ${actual.y}, z=${actual.zoom}) ≈ ` +
+      `(${expected.x}, ${expected.y}, z=${expected.zoom})`,
   ).toBe(true);
 }
 
@@ -111,6 +124,65 @@ describe('worldToScreen / screenToWorld — known values (brief R4.1)', () => {
 
   it('screenToWorld({0, 0}) = {100, 50}', () => {
     expectClosePoint(screenToWorld(cam, { x: 0, y: 0 }), { x: 100, y: 50 });
+  });
+});
+
+describe('panBy (brief R4.7)', () => {
+  const rand = mulberry32(0x5eed02);
+
+  it('moves the world point under s0 to s0 + d, zoom unchanged', () => {
+    for (let i = 0; i < 200; i++) {
+      const cam = randomCamera(rand, 1e4);
+      const s0 = randomPoint(rand, 1e3);
+      const d = randomPoint(rand, 100);
+      const worldBefore = screenToWorld(cam, s0);
+      const panned = panBy(cam, d.x, d.y);
+      const worldAfter = screenToWorld(panned, {
+        x: s0.x + d.x,
+        y: s0.y + d.y,
+      });
+      expectClosePoint(worldAfter, worldBefore);
+      expect(panned.zoom).toBe(cam.zoom);
+    }
+  });
+
+  it('returns a new object, never the mutated input', () => {
+    const cam: Camera = { x: 10, y: 20, zoom: 2 };
+    const panned = panBy(cam, 5, -5);
+    expect(panned).not.toBe(cam);
+    expect(cam).toEqual({ x: 10, y: 20, zoom: 2 });
+  });
+
+  it('non-finite deltas are a no-op: camera returned unchanged', () => {
+    const cam: Camera = { x: 10, y: 20, zoom: 2 };
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expectCloseCamera(panBy(cam, bad, 1), cam);
+      expectCloseCamera(panBy(cam, 1, bad), cam);
+    }
+  });
+
+  it('a camera with a non-finite field is returned unchanged (no-op)', () => {
+    for (const key of ['x', 'y', 'zoom'] as const) {
+      const cam: Camera = { x: 10, y: 20, zoom: 2 };
+      cam[key] = NaN;
+      // Unchanged means unchanged: the same camera, nothing computed.
+      expect(panBy(cam, 5, 5)).toBe(cam);
+    }
+  });
+
+  it('a camera with zoom ≤ 0 is returned unchanged (never NaN)', () => {
+    const zero: Camera = { x: 10, y: 20, zoom: 0 };
+    const negative: Camera = { x: 10, y: 20, zoom: -2 };
+    expectCloseCamera(panBy(zero, 0, 0), { x: 10, y: 20, zoom: 0 });
+    expectCloseCamera(panBy(negative, 5, 5), { x: 10, y: 20, zoom: -2 });
+  });
+
+  it('frozen camera input works and is not mutated', () => {
+    const cam: Camera = Object.freeze({ x: 10, y: 20, zoom: 2 });
+    const panned = panBy(cam, 8, 4);
+    expectCloseCamera(panned, { x: 6, y: 18, zoom: 2 });
+    expect(Object.isFrozen(cam)).toBe(true);
+    expect(panned).not.toBe(cam);
   });
 });
 
