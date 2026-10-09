@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     name: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7 # v7.0.1
@@ -57,4 +57,5 @@ jobs:
           path: |
             playwright-report/
             test-results/
+          if-no-files-found: ignore
           retention-days: 7
