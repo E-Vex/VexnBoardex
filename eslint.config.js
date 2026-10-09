@@ -19,7 +19,11 @@ const LAYER_ALLOW = {
 /** Build one `no-restricted-imports` override block for a layer directory. */
 function layerBlock(layer) {
   const allowed = LAYER_ALLOW[layer];
-  const otherLayers = Object.keys(LAYER_ALLOW).filter((l) => l !== layer);
+  // Only layers NOT in this layer's allowlist are blocked — e.g. view may
+  // import core (PLAN §4), so core must not appear in view's blocked list.
+  const blocked = Object.keys(LAYER_ALLOW).filter(
+    (l) => l !== layer && !allowed.includes(l),
+  );
   return {
     files: [`src/${layer}/**/*.ts`],
     rules: {
@@ -27,8 +31,8 @@ function layerBlock(layer) {
         'error',
         {
           patterns: [
-            // Block any import that reaches into another layer's folder…
-            ...otherLayers.map((l) => ({
+            // Block any import that reaches into a layer not allowed here…
+            ...blocked.map((l) => ({
               group: [`**/${l}/**`, `../${l}`, `../${l}/**`],
               message: `Layer "${layer}" may not import from "${l}". Allowed: ${allowed.length ? allowed.join(', ') : 'nothing'} (see PLAN §4).`,
             })),
@@ -72,6 +76,51 @@ export default tseslint.config(
                 'e2e tests must stay black-box: no imports from src/ (see T-002 R2).',
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // T-003 R3: src/view/camera.ts is DOM-free — camera purity enforced by
+    // tooling (PLAN D-18). No window/document/navigator/devicePixelRatio/
+    // requestAnimationFrame/performance and no DOM types may appear there.
+    files: ['src/view/camera.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'window',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'document',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'navigator',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'devicePixelRatio',
+          message:
+            'devicePixelRatio is handled only in the canvas host (PLAN D-07).',
+        },
+        {
+          name: 'requestAnimationFrame',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'performance',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]",
+          message:
+            'DOM types are forbidden in view/camera.ts (PLAN R3, D-18).',
         },
       ],
     },

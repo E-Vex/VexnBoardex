@@ -1,6 +1,6 @@
 # VexBoard — Project Plan
 
-> Status: v1.0 · Written 2026-10-09 · Owner of this file: **Planner**
+> Status: v1.1 · Updated 2026-10-09 (M0 closed) · Owner of this file: **Planner**
 > This file is the single source of truth for architecture, decisions and workflow.
 > The implementer does not edit it. Changes come from the Planner only.
 
@@ -53,7 +53,11 @@ Real-time collaboration, accounts or cloud sync, touch/mobile polish, plugins, a
    - New behavior has tests. A bug fix starts with a failing test.
    - No unrelated changes in the diff.
 6. **Commits:** small and focused, one logical change each, message prefixed with the task id, e.g. `[T-003] feat: screenToWorld`. Never one giant commit.
-7. **Evidence over claims.** "Tests pass" is not enough. Paste the relevant command output in the report.
+7. **Evidence over claims.** "Tests pass" is not enough. Paste the relevant command output in the report as plain text inside a fenced code block. A green CI run on the pull request is the evidence for the automated checks; report its URL.
+8. **Branches and merging.** One branch per task, named `task/T-xxx-slug`, created from an up-to-date `main`. Never commit to `main`. The Owner merges pull requests with a merge commit (no squash). The implementer never merges.
+9. **Verification experiments.** Deliberate-breakage experiments (proving that a test, lint rule or gate can fail) run only on a throwaway branch, never on a task branch, and are never merged.
+10. **Secrets.** Never write a token, password or key into any file inside the repository working tree, tracked or not, and never commit one. Keep credentials in a credential helper or an environment variable outside the repo. Tokens must be fine-grained, limited to this repository, and expire.
+11. **`AGENTS.md` stays short:** 50 lines at most.
 
 ### Task brief format (Planner → Implementer)
 
@@ -92,8 +96,8 @@ Milestone / Depends on
 |---|---|---|
 | D-01 | **TypeScript (strict) + Vite.** Vanilla DOM for toolbars, **no UI framework**. | A canvas app is imperative; a framework adds a second state system to fight with. |
 | D-02 | **Canvas 2D** for the board. A **DOM overlay** (textarea) for editing text. | Full control, easy PNG export, scales to thousands of nodes. DOM text editing handles input, IME and selection for free. |
-| D-03 | **npm** and a pinned **Node LTS** (`.nvmrc` + `engines`). | Simple and reproducible. |
-| D-04 | **Vitest** for unit tests (colocated `*.test.ts`). **Playwright** for browser tests from T-002. | Core logic is testable without a browser; behavior needs a real one. |
+| D-03 | **npm** and **Node 24** (LTS), pinned in `.nvmrc` and `engines.node`, enforced by `engine-strict=true` in `.npmrc`. Node 20 is end of life. Revisit when Node 26 becomes LTS. | Simple, reproducible, and CI uses the same version via `.nvmrc`. |
+| D-04 | **Vitest** for unit tests (colocated `*.test.ts`). **Playwright** (Chromium only) for browser tests in `e2e/`, strictly black-box: e2e files never import from `src/`. | Core logic is testable without a browser; behavior needs a real one. |
 | D-05 | **Three state layers:** Document, View, UI (section 4). | Mixing them causes the undo and zoom bugs. |
 | D-06 | **`core/` is pure:** no DOM, no `Math.random`, no clock, no I/O. IDs and timestamps are passed in. Enforced by tooling (a core tsconfig *without* the DOM lib, plus lint import rules). | Deterministic, trivially testable, safe to reuse in Desktop. |
 | D-07 | **World coordinates and camera.** 1 world unit = 1 CSS px at zoom 1. Camera `{ x, y, zoom }` where `(x, y)` is the **world point at the viewport's top-left**. `screen = (world − cam) × zoom`, `world = screen / zoom + cam`. `devicePixelRatio` is handled **only** in the canvas host. | One definition prevents the zoom/offset class of bugs. |
@@ -105,6 +109,9 @@ Milestone / Depends on
 | D-13 | **Z-order** is an `order: Id[]` array (bottom → top). Hit-testing checks top-most first. | Simple, explicit, serializable. |
 | D-14 | **Modes** (Mind Map, Flowchart, Kanban) are behaviors layered on the *same* document model, not separate formats. Templates are saved documents. | Avoids three parallel data models. |
 | D-15 | **Desktop = Tauri**, added at the end (M10). The web app must work unchanged inside it. | Keeps the web build the primary target. |
+| D-16 | **Tooling as of M0:** Vite 8, Vitest 5, ESLint 10 with typescript-eslint, Prettier, `@playwright/test`. Layer boundaries are enforced by ESLint `no-restricted-imports` and a DOM-free `tsconfig.core.json`. | Tooling, not discipline, protects the architecture. |
+| D-17 | **CI:** GitHub Actions, one job named `check`: hygiene guard → `npm run check` → `npm run build` → Playwright e2e. Runs on every pull request and every push to `main`. `main` requires this check to pass. The runner is pinned to `ubuntu-24.04`. | A green check is the acceptance evidence. |
+| D-18 | **Camera functions are pure.** They return new values, never mutate, work in CSS pixels (never device pixels), and treat non-finite input as a no-op (return the camera unchanged). | A camera that becomes `NaN` makes everything vanish. |
 
 ---
 
@@ -180,6 +187,19 @@ type Patch = {
 }
 ```
 
+### Camera API (`src/view/camera.ts`, pure, no DOM)
+
+```ts
+type Camera = { x: number; y: number; zoom: number }   // (x, y) = world point at the viewport's top-left
+
+worldToScreen(cam, p)                  // (p − cam) × zoom
+screenToWorld(cam, p)                  // p / zoom + cam
+panBy(cam, dxScreen, dyScreen)         // content follows the pointer: cam − d / zoom
+zoomAt(cam, screenPoint, newZoom)      // clamp, then keep the world point under screenPoint fixed
+zoomByFactorAt(cam, screenPoint, factor)
+visibleWorldRect(cam, width, height)   // { x: cam.x, y: cam.y, w: width / zoom, h: height / zoom }
+```
+
 ### Input as an explicit state machine
 
 ```
@@ -234,8 +254,11 @@ Each milestone is sliced into **small tasks, each fitting one agent session**. T
 Repo, toolchain, enforced layer boundaries, a canvas that fills the window.
 - **T-001** Scaffold project (Vite + strict TS, Vitest, ESLint, Prettier, layer boundaries, DPR-aware canvas host, docs)
 - **T-002** Playwright smoke test (page loads, canvas fills viewport, resizes correctly)
+- **T-002b** CI workflow (GitHub Actions: hygiene guard, check, build, e2e)
 
 *Done when:* `npm run check` and `npm run build` pass, and layer violations fail the tooling.
+
+**Status: closed.** T-001, T-002 and T-002b are done; CI is green and enforced.
 
 ### M1 — Camera (infinite canvas)
 - **T-003** Pure camera math: `screenToWorld`, `worldToScreen`, `zoomAt(cursor)`, clamp (unit-tested)
@@ -291,6 +314,7 @@ Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; t
   - load old fixture → no missing elements
 - **Playwright:** drag, zoom and pan flows; screenshot checks at 10%, 100% and 300% zoom.
 - **Rule:** found a bug? The first step is a failing test that reproduces it.
+- **CI:** every pull request runs the hygiene guard, `check`, `build` and e2e in CI. Local passes are not enough to merge.
 
 ---
 
@@ -304,6 +328,8 @@ Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; t
 | Edge routing for flowcharts | Straight and curved only until M9 |
 | Scope creep (modes, templates) | Nothing from M9 starts before M8 is solid |
 | Agent builds the wrong thing for several milestones | Requirements live here and in briefs, never only in chat; every report is checked against PLAN |
+| Secrets leaking into the repo | Rule 10; CI hygiene guard; GitHub push protection; fine-grained, repo-limited, expiring tokens |
+| CI runner image changes underneath us | Runner pinned to `ubuntu-24.04` (D-17); upgrade deliberately |
 
 ---
 
@@ -313,9 +339,17 @@ Maintained by the Planner.
 
 | Task | Title | Status |
 |---|---|---|
-| T-001 | Scaffold project | **Next — brief issued** |
-| T-002 | Playwright smoke test | Planned |
-| T-003 | Pure camera math | Planned |
+| T-001 | Scaffold project | Done |
+| T-002 | Playwright smoke test | Done |
+| T-002b | CI workflow | Done (PR #3) |
+| T-003 | Pure camera math | **Next — brief issued** |
 | T-004 | Grid + pan + zoom | Planned |
 | T-005 | Debug HUD | Planned |
 | T-006 | Document model, patches, dispatch | Planned |
+
+---
+
+## 10. Changelog
+
+- **v1.1** (2026-10-09, M0 closed): Node 24 pinned (D-03); Playwright black-box rule (D-04); tooling versions, CI and camera purity decisions (D-16 to D-18); camera API (section 4); new workflow rules 7–11 (evidence format, branches and merging, verification experiments, secrets, `AGENTS.md` cap); CI added to testing strategy and risks; M0 closed; task board updated.
+- **v1.0** (2026-10-09): initial plan.

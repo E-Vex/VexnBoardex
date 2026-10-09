@@ -16,27 +16,27 @@ decisions), 4 (architecture) and 5 (invariants) are **binding**.
 - Locked decisions (§3) and invariants (§5) are binding. Disagree → say so
   in the report with a reason; never work around them.
 
-## Before reporting any task done
+## Workflow rules 7–11 (PLAN §2)
 
-Run `npm run check:all` (check + e2e) and paste the real output.
-Evidence over claims. Deliberate-breakage experiments (proofs that a test
-or rule can fail) run only on a throwaway branch, never on the task branch.
-
-## Commits
-
-Small and focused, one logical change each, prefixed with the task id:
-`[T-003] feat: screenToWorld`. Never one giant commit.
-Branch policy: one branch per task, named `task/T-xxx-slug`; never commit
-to `main` — the Owner merges PRs (no squash).
+- Evidence over claims: before reporting a task done, run `npm run check:all`
+  and paste the real command output as plain text in fenced blocks, plus the
+  green CI run URL of the pull request.
+- Branches: one branch per task, `task/T-xxx-slug`, cut from an up-to-date
+  `main`; never commit to `main`. The Owner merges PRs with a merge commit
+  (no squash); the implementer never merges.
+- Deliberate-breakage experiments (proving a test or gate can fail) run only
+  on a throwaway branch, never on the task branch, and are never merged.
+- Secrets: never write a token, password or key into any file inside the
+  repo working tree, tracked or not, and never commit one. Credentials live
+  in a credential helper or environment variable outside the repo; tokens
+  are fine-grained, limited to this repository, and expire.
+- Commits: small, focused, one logical change each, prefixed with the task
+  id, e.g. `[T-003] feat: screenToWorld`. Never one giant commit.
+- This file: 50 lines at most (rule 11).
 
 ## Report format (Implementer → Planner) — PLAN §2
 
 ```
-# REPORT T-xxx
-## Summary                 (2–3 lines)
-## Acceptance checklist    (each criterion: done / not done + evidence)
-## Decisions made          (small choices; "none" if none)
-## Questions / deviations  (conflicts with PLAN or brief; "none" if none)
-## Risks noticed
-## Suggestions             (not done, only proposed)
+# REPORT T-xxx — Summary / Acceptance checklist (each: done + evidence)
+# Decisions made / Questions or deviations / Risks noticed / Suggestions
 ```
