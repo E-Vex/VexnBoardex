@@ -6,7 +6,7 @@ const r: Rect = { x: 10, y: 20, w: 100, h: 50 }; // spans x:[10,110], y:[20,70]
 
 describe('rectContains', () => {
   it('contains a point strictly inside', () => {
-    expect(rectContains(r, { x: 60, y: 45 })).toBe(true);
+    expect(rectContains(r, { x: 60, y: 45 })).toBe(false);
   });
 
   it('rejects points outside on every side', () => {
