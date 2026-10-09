@@ -19,7 +19,8 @@ decisions), 4 (architecture) and 5 (invariants) are **binding**.
 ## Before reporting any task done
 
 Run `npm run check:all` (check + e2e) and paste the real output.
-Evidence over claims.
+Evidence over claims. Deliberate-breakage experiments (proofs that a test
+or rule can fail) run only on a throwaway branch, never on the task branch.
 
 ## Commits
 
