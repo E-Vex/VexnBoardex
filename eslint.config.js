@@ -80,4 +80,49 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // T-003 R3: src/view/camera.ts is DOM-free — camera purity enforced by
+    // tooling (PLAN D-18). No window/document/navigator/devicePixelRatio/
+    // requestAnimationFrame/performance and no DOM types may appear there.
+    files: ['src/view/camera.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'window',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'document',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'navigator',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'devicePixelRatio',
+          message:
+            'devicePixelRatio is handled only in the canvas host (PLAN D-07).',
+        },
+        {
+          name: 'requestAnimationFrame',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+        {
+          name: 'performance',
+          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]",
+          message:
+            'DOM types are forbidden in view/camera.ts (PLAN R3, D-18).',
+        },
+      ],
+    },
+  },
 );
