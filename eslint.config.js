@@ -140,4 +140,31 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // T-006 R8 / D-23: determinism in core/ — no Date and no Math.random in
+    // non-test core files. Test helpers (*.helper.ts) and tests (*.test.ts)
+    // are excluded; only the seeded PRNG in prng.helper.ts uses Math.random-
+    // free deterministic logic (it uses Math.imul, which is allowed).
+    files: ['src/core/**/*.ts'],
+    ignores: ['src/core/**/*.test.ts', 'src/core/**/*.helper.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'Date',
+          message:
+            'Date is forbidden in core/ (PLAN D-23): core must be deterministic.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'Math.random is forbidden in core/ (PLAN D-23): core must be deterministic.',
+        },
+      ],
+    },
+  },
 );
