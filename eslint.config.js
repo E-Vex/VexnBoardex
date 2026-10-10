@@ -49,7 +49,13 @@ function layerBlock(layer) {
 }
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**'] },
+  { ignores: [
+    'dist/**',
+    'coverage/**',
+    'node_modules/**',
+    'playwright-report/**',
+    'test-results/**',
+  ] },
   ...tseslint.configs.recommended,
   ...Object.keys(LAYER_ALLOW).map(layerBlock),
   {
@@ -130,6 +136,33 @@ export default tseslint.config(
             "TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]",
           message:
             'DOM types are forbidden in DOM-free files (PLAN R3/R7, D-18).',
+        },
+      ],
+    },
+  },
+  {
+    // T-006 R8 / D-23: determinism in core/ — no Date and no Math.random in
+    // non-test core files. Test helpers (*.helper.ts) and tests (*.test.ts)
+    // are excluded; only the seeded PRNG in prng.helper.ts uses Math.random-
+    // free deterministic logic (it uses Math.imul, which is allowed).
+    files: ['src/core/**/*.ts'],
+    ignores: ['src/core/**/*.test.ts', 'src/core/**/*.helper.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'Date',
+          message:
+            'Date is forbidden in core/ (PLAN D-23): core must be deterministic.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'Math.random is forbidden in core/ (PLAN D-23): core must be deterministic.',
         },
       ],
     },
