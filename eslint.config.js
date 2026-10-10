@@ -85,7 +85,15 @@ export default tseslint.config(
     // math enforced by tooling (PLAN D-18). No window/document/navigator/
     // devicePixelRatio/requestAnimationFrame/performance and no DOM types may
     // appear in these files.
-    files: ['src/view/camera.ts', 'src/view/grid.ts', 'src/ui/hudFormat.ts'],
+    files: [
+      'src/view/camera.ts',
+      'src/view/grid.ts',
+      'src/view/cameraStore.ts',
+      'src/ui/hudFormat.ts',
+      'src/input/wheel.ts',
+      'src/input/panController.ts',
+      'src/input/keys.ts',
+    ],
     rules: {
       'no-restricted-globals': [
         'error',
