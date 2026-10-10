@@ -49,7 +49,13 @@ function layerBlock(layer) {
 }
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**'] },
+  { ignores: [
+    'dist/**',
+    'coverage/**',
+    'node_modules/**',
+    'playwright-report/**',
+    'test-results/**',
+  ] },
   ...tseslint.configs.recommended,
   ...Object.keys(LAYER_ALLOW).map(layerBlock),
   {
