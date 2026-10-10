@@ -9,3 +9,4 @@ export {
   isEmptyPatch,
   PatchConflictError,
 } from './patch';
+export { compileCommand, CommandError } from './commands';

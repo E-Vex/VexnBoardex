@@ -81,3 +81,12 @@ export interface Patch {
   groups: Record<Id, EntityChange<Group>>;
   order?: { before: Id[]; after: Id[] };
 }
+
+/**
+ * A command — plain, serialisable data. IDs are supplied by the caller
+ * (D-11). Compiling a command against a document produces a patch (D-22).
+ */
+export type Command =
+  | { type: 'node.create'; node: Node }
+  | { type: 'node.move'; ids: Id[]; dx: number; dy: number }
+  | { type: 'node.delete'; ids: Id[] };
