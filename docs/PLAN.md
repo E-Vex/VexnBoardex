@@ -1,6 +1,6 @@
 # VexBoard — Project Plan
 
-> Status: v1.1 · Updated 2026-10-09 (M0 closed) · Owner of this file: **Planner**
+> Status: v1.2 · Updated 2026-10-10 (M1 closed) · Owner of this file: **Planner**
 > This file is the single source of truth for architecture, decisions and workflow.
 > The implementer does not edit it. Changes come from the Planner only.
 
@@ -42,7 +42,7 @@ Real-time collaboration, accounts or cloud sync, touch/mobile polish, plugins, a
 ### Rules of engagement
 
 1. **Order of authority:** task brief > this PLAN > the implementer's own assumptions. If two of them conflict, stop and ask. Never resolve it silently.
-2. **No silent decisions.** If something is unspecified:
+2. **No silent Decisions.** If something is unspecified:
    - If it is small and reversible (a variable name, a file split), choose the simplest option and list it in the report under *Decisions made*.
    - If it touches **state layers, coordinates, commands/history, or the file format**, stop and ask *before* writing code.
 3. **Scope discipline.** Do exactly what the brief says. Notice something else worth doing? Write it under *Suggestions* in the report. Do not do it.
@@ -58,6 +58,8 @@ Real-time collaboration, accounts or cloud sync, touch/mobile polish, plugins, a
 9. **Verification experiments.** Deliberate-breakage experiments (proving that a test, lint rule or gate can fail) run only on a throwaway branch, never on a task branch, and are never merged.
 10. **Secrets.** Never write a token, password or key into any file inside the repository working tree, tracked or not, and never commit one. Keep credentials in a credential helper or an environment variable outside the repo. Tokens must be fine-grained, limited to this repository, and expire.
 11. **`AGENTS.md` stays short:** 50 lines at most.
+12. **Reports start with the head SHA** of the task branch, and every piece of evidence (CI run URL, test output) refers to that SHA. Never force-push a branch that is already pushed unless the Planner approved it. If history is rewritten, the report says so, with before/after SHAs and the reason.
+13. **Quota discipline.** Briefs list a priority order. Push after every commit. If budget runs low, stop at a clean commit boundary with everything pushed and say exactly what remains.
 
 ### Task brief format (Planner → Implementer)
 
@@ -112,6 +114,12 @@ Milestone / Depends on
 | D-16 | **Tooling as of M0:** Vite 8, Vitest 5, ESLint 10 with typescript-eslint, Prettier, `@playwright/test`. Layer boundaries are enforced by ESLint `no-restricted-imports` and a DOM-free `tsconfig.core.json`. | Tooling, not discipline, protects the architecture. |
 | D-17 | **CI:** GitHub Actions, one job named `check`: hygiene guard → `npm run check` → `npm run build` → Playwright e2e. Runs on every pull request and every push to `main`. `main` requires this check to pass. The runner is pinned to `ubuntu-24.04`. | A green check is the acceptance evidence. |
 | D-18 | **Camera functions are pure.** They return new values, never mutate, work in CSS pixels (never device pixels), and treat non-finite input as a no-op (return the camera unchanged). | A camera that becomes `NaN` makes everything vanish. |
+| D-19 | **Input conventions.** Plain wheel pans. Ctrl/⌘ + wheel zooms at the cursor (this also covers trackpad pinch in Chrome and Firefox). Space + left-drag or middle-drag pans. `+`, `-`, `0` zoom in (×1.25), zoom out (×0.8) and reset to 100%, around the viewport center. Wheel zoom factor is `clamp(exp(−deltaPx × 0.002), 0.5, 2)`. Plain left-drag is reserved for selection and tools. Touch is out of scope for now. | Matches common whiteboard tools and keeps the primary mouse button free for editing. |
+| D-20 | **Camera at startup:** the world origin is centered in the viewport at zoom 1 (`cameraCenteredOn`). A window resize keeps the camera's top-left world point fixed. Camera state lives in a pure `cameraStore` (`get`, `set`, `subscribe`). | Predictable start; one observable source of truth. |
+| D-21 | **`order` holds node ids only** (bottom → top). Edges render beneath all nodes. Hit-testing checks nodes top-most first. | Simple, explicit z-order; clarifies D-13. |
+| D-22 | **Commands are plain, serializable data.** `compileCommand(doc, command) → Patch` is pure and strict: an invalid command (unknown id, duplicate id, non-finite number, dangling reference) throws `CommandError`. A no-op command compiles to an empty patch. `applyPatch` is strict too: it throws `PatchConflictError` if a patch's `before` does not match the document. IDs come from the caller (D-11). | Desync bugs fail loudly in tests instead of silently corrupting a document. |
+| D-23 | **Determinism is enforced by lint in `core/`:** no `Date` and no `Math.random` in non-test core files. | D-06 enforced by tooling. |
+| D-24 | **Document validity** is defined by `validateDoc` (pure): `order` is exactly a permutation of the node ids; every map key equals its entity's id; every edge references two existing, distinct nodes; every `groupId` references an existing group; all numbers are finite, with `w > 0` and `h > 0`. Property tests run it after every command. | One definition of "valid", reused by the loader in M4. |
 
 ---
 
@@ -156,7 +164,7 @@ type Doc = {
   nodes: Record<Id, Node>
   edges: Record<Id, Edge>
   groups: Record<Id, Group>
-  order: Id[]                    // z-order, bottom → top
+  order: Id[]                    // z-order of node ids, bottom → top (D-21)
 }
 
 type Node = {
@@ -176,7 +184,9 @@ type Edge = {
   label?: string
 }
 
-type View = { x: number; y: number; zoom: number }
+type Group = { id: Id; name: string }
+
+type Camera = { x: number; y: number; zoom: number }   // View layer state
 
 // A command's result. Undo = apply the inverse.
 type Patch = {
@@ -198,6 +208,25 @@ panBy(cam, dxScreen, dyScreen)         // content follows the pointer: cam − d
 zoomAt(cam, screenPoint, newZoom)      // clamp, then keep the world point under screenPoint fixed
 zoomByFactorAt(cam, screenPoint, factor)
 visibleWorldRect(cam, width, height)   // { x: cam.x, y: cam.y, w: width / zoom, h: height / zoom }
+cameraCenteredOn(world, width, height, zoom)   // camera that puts `world` at the viewport center
+```
+
+### Core API (`src/core/`, pure: no DOM, no randomness, no clock)
+
+```ts
+type Command =                                   // plain data; ids are supplied by the caller
+  | { type: 'node.create'; node: Node }          // appended on top of `order`
+  | { type: 'node.move';   ids: Id[]; dx: number; dy: number }
+  | { type: 'node.delete'; ids: Id[] }           // also removes every edge touching them, in the same patch (I-09)
+  // edge.create / edge.delete arrive in M3
+
+emptyDoc(): Doc
+validateDoc(doc): string[]                       // [] when valid (D-24)
+compileCommand(doc, command): Patch              // throws CommandError (D-22)
+applyPatch(doc, patch): Doc                      // strict; throws PatchConflictError
+invertPatch(patch): Patch
+isEmptyPatch(patch): boolean
+createDocStore(initial)                          // get(), dispatch(command) → Patch, subscribe(fn)
 ```
 
 ### Input as an explicit state machine
@@ -261,16 +290,18 @@ Repo, toolchain, enforced layer boundaries, a canvas that fills the window.
 **Status: closed.** T-001, T-002 and T-002b are done; CI is green and enforced.
 
 ### M1 — Camera (infinite canvas)
-- **T-003** Pure camera math: `screenToWorld`, `worldToScreen`, `zoomAt(cursor)`, clamp (unit-tested)
-- **T-004** Grid rendering + pan (space+drag, middle mouse, trackpad scroll) + zoom (wheel / pinch)
-- **T-005** Debug HUD: camera values, cursor in screen and world coordinates
+- **T-003** Pure camera math: `worldToScreen`, `screenToWorld`, `panBy`, `zoomAt`, `zoomByFactorAt`, `visibleWorldRect`, clamp
+- **T-004** Dotted grid, pure board renderer, HUD with camera and cursor coordinates, `cameraCenteredOn`, layer-rule matrix test
+- **T-005** Pan and zoom input (pure state machine, wheel, keyboard, DOM glue) and `cameraStore`
 
 *Done when:* `screenToWorld(worldToScreen(p)) == p` at several zooms, and the point under the cursor does not move while zooming.
 
+**Status: closed.** T-003 to T-005 are merged; the HUD proves every camera change in the browser tests.
+
 ### M2 — Nodes
-- **T-006** Document model, `Patch` apply/invert, `dispatch` and store (pure, fully tested, including `apply` then `invert` restoring the doc)
-- **T-007** Render nodes + create (double-click / toolbar)
-- **T-008** Select, move (preview → single commit), delete; hit-testing
+- **T-006** Document model in `core/`: types, `validateDoc`, strict `applyPatch` / `invertPatch`, node commands, `createDocStore`, seeded property tests (no UI)
+- **T-007** Render nodes + create (double-click / toolbar); the HUD gains a `nodes` counter so e2e can observe the document
+- **T-008** Select, move (preview → single commit), delete; hit-testing; the HUD gains a `selected` counter
 
 *Done when:* nodes stay visually fixed in the world through any pan/zoom, and a drag is one document change.
 
@@ -312,7 +343,9 @@ Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; t
   - zoom 300% → text overlay aligns with the node
   - move → undo → exact original position
   - load old fixture → no missing elements
-- **Playwright:** drag, zoom and pan flows; screenshot checks at 10%, 100% and 300% zoom.
+- **Playwright:** drag, zoom and pan flows; screenshot checks at 10%, 100% and 300% zoom. E2E tests are black-box: they read the HUD, canvas pixels and computed styles only.
+- **Property tests:** seeded random command sequences check document validity after every step, and that undoing all patches restores the initial document and redoing them restores the final one.
+- **Layer matrix test:** every allowed and forbidden import pair is linted programmatically (`layerMatrix.test.ts`), so the dependency rule cannot silently break.
 - **Rule:** found a bug? The first step is a failing test that reproduces it.
 - **CI:** every pull request runs the hygiene guard, `check`, `build` and e2e in CI. Local passes are not enough to merge.
 
@@ -330,6 +363,7 @@ Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; t
 | Agent builds the wrong thing for several milestones | Requirements live here and in briefs, never only in chat; every report is checked against PLAN |
 | Secrets leaking into the repo | Rule 10; CI hygiene guard; GitHub push protection; fine-grained, repo-limited, expiring tokens |
 | CI runner image changes underneath us | Runner pinned to `ubuntu-24.04` (D-17); upgrade deliberately |
+| Document and patch desync (history corrupts the document) | Strict `applyPatch` and `compileCommand` (D-22), `validateDoc` (D-24), seeded property tests |
 
 ---
 
@@ -342,14 +376,17 @@ Maintained by the Planner.
 | T-001 | Scaffold project | Done |
 | T-002 | Playwright smoke test | Done |
 | T-002b | CI workflow | Done (PR #3) |
-| T-003 | Pure camera math | **Next — brief issued** |
-| T-004 | Grid + pan + zoom | Planned |
-| T-005 | Debug HUD | Planned |
-| T-006 | Document model, patches, dispatch | Planned |
+| T-003 | Pure camera math | Done (PR #5) |
+| T-004 | Grid, renderer, HUD | Done (PR #6) |
+| T-005 | Pan and zoom input | Done (PR #7) |
+| T-006 | Document model, patches, commands, store (core) | **Next — brief issued** |
+| T-007 | Render nodes + create | Planned |
+| T-008 | Select, move, delete + hit-testing | Planned |
 
 ---
 
 ## 10. Changelog
 
+- **v1.2** (2026-10-10, M1 closed): input conventions, camera startup and store (D-19, D-20); document-model decisions (D-21 to D-24) and the Core API (section 4); workflow rules 12–13 (head SHA in reports, no silent force-push, quota discipline); property tests, layer matrix test and black-box e2e in the testing strategy; M1 closed; M2 sliced; task board updated.
 - **v1.1** (2026-10-09, M0 closed): Node 24 pinned (D-03); Playwright black-box rule (D-04); tooling versions, CI and camera purity decisions (D-16 to D-18); camera API (section 4); new workflow rules 7–11 (evidence format, branches and merging, verification experiments, secrets, `AGENTS.md` cap); CI added to testing strategy and risks; M0 closed; task board updated.
 - **v1.0** (2026-10-09): initial plan.

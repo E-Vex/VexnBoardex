@@ -16,7 +16,7 @@ decisions), 4 (architecture) and 5 (invariants) are **binding**.
 - Locked decisions (§3) and invariants (§5) are binding. Disagree → say so
   in the report with a reason; never work around them.
 
-## Workflow rules 7–11 (PLAN §2)
+## Workflow rules 7–13 (PLAN §2)
 
 - Evidence over claims: before reporting a task done, run `npm run check:all`
   and paste the real command output as plain text in fenced blocks, plus the
@@ -32,6 +32,12 @@ decisions), 4 (architecture) and 5 (invariants) are **binding**.
   are fine-grained, limited to this repository, and expire.
 - Commits: small, focused, one logical change each, prefixed with the task
   id, e.g. `[T-003] feat: screenToWorld`. Never one giant commit.
+- Reports start with the head SHA; all evidence refers to it. Never
+  force-push a pushed branch unless approved; if history is rewritten, say
+  so with before/after SHAs and the reason (rule 12).
+- Quota discipline: follow the brief's priority order; push after every
+  commit; if budget runs low, stop at a clean boundary and list what
+  remains (rule 13).
 - This file: 50 lines at most (rule 11).
 
 ## Report format (Implementer → Planner) — PLAN §2
