@@ -90,6 +90,7 @@ export default tseslint.config(
       'src/view/grid.ts',
       'src/view/cameraStore.ts',
       'src/ui/hudFormat.ts',
+      'src/input/wheel.ts',
     ],
     rules: {
       'no-restricted-globals': [
