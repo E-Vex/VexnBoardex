@@ -10,3 +10,5 @@ export {
   PatchConflictError,
 } from './patch';
 export { compileCommand, CommandError } from './commands';
+export { createDocStore } from './store';
+export type { DocStore } from './store';
