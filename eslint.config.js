@@ -81,24 +81,25 @@ export default tseslint.config(
     },
   },
   {
-    // T-003 R3: src/view/camera.ts is DOM-free — camera purity enforced by
-    // tooling (PLAN D-18). No window/document/navigator/devicePixelRatio/
-    // requestAnimationFrame/performance and no DOM types may appear there.
-    files: ['src/view/camera.ts'],
+    // T-003 R3 / T-004 R7: DOM-free source files — camera purity and grid
+    // math enforced by tooling (PLAN D-18). No window/document/navigator/
+    // devicePixelRatio/requestAnimationFrame/performance and no DOM types may
+    // appear in these files.
+    files: ['src/view/camera.ts', 'src/view/grid.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
         {
           name: 'window',
-          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+          message: 'DOM-free file (PLAN R3/R7, D-18): pure math only.',
         },
         {
           name: 'document',
-          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+          message: 'DOM-free file (PLAN R3/R7, D-18): pure math only.',
         },
         {
           name: 'navigator',
-          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+          message: 'DOM-free file (PLAN R3/R7, D-18): pure math only.',
         },
         {
           name: 'devicePixelRatio',
@@ -107,11 +108,11 @@ export default tseslint.config(
         },
         {
           name: 'requestAnimationFrame',
-          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+          message: 'DOM-free file (PLAN R3/R7, D-18): pure math only.',
         },
         {
           name: 'performance',
-          message: 'view/camera.ts is DOM-free (PLAN R3, D-18): pure math only.',
+          message: 'DOM-free file (PLAN R3/R7, D-18): pure math only.',
         },
       ],
       'no-restricted-syntax': [
@@ -120,7 +121,7 @@ export default tseslint.config(
           selector:
             "TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]",
           message:
-            'DOM types are forbidden in view/camera.ts (PLAN R3, D-18).',
+            'DOM types are forbidden in DOM-free files (PLAN R3/R7, D-18).',
         },
       ],
     },
