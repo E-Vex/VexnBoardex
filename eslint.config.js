@@ -91,6 +91,7 @@ export default tseslint.config(
       'src/view/cameraStore.ts',
       'src/ui/hudFormat.ts',
       'src/input/wheel.ts',
+      'src/input/panController.ts',
     ],
     rules: {
       'no-restricted-globals': [
