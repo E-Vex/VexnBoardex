@@ -5,6 +5,7 @@ import {
   DEFAULT_CAMERA,
   MAX_ZOOM,
   MIN_ZOOM,
+  cameraCenteredOn,
   clampZoom,
   panBy,
   screenToWorld,
@@ -381,5 +382,70 @@ describe('round trips — 200 seeded random cameras and points (brief R4.2)', ()
         expectClosePoint(worldToScreen(cam, screenToWorld(cam, s)), s);
       }
     }
+  });
+});
+
+describe('cameraCenteredOn (brief R2)', () => {
+  it('centers world {0,0} at zoom 1 on a 1280×720 viewport → cam {−640, −360, 1}', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    expectCloseCamera(cam, { x: -640, y: -360, zoom: 1 });
+  });
+
+  it('centers world {100, 50} at zoom 2 on an 800×600 viewport', () => {
+    const cam = cameraCenteredOn({ x: 100, y: 50 }, 800, 600, 2);
+    // x = 100 − 800/(2×2) = 100 − 200 = −100
+    // y = 50 − 600/(2×2) = 50 − 150 = −100
+    expectCloseCamera(cam, { x: -100, y: -100, zoom: 2 });
+  });
+
+  it('the world point ends up at the viewport centre', () => {
+    const rand = mulberry32(0x5eed08);
+    for (let i = 0; i < 100; i++) {
+      const world = randomPoint(rand, 1e4);
+      const w = 200 + rand() * 2000;
+      const h = 200 + rand() * 2000;
+      const z = randomZoom(rand);
+      const cam = cameraCenteredOn(world, w, h, z);
+      // screenToWorld(cam, {w/2, h/2}) should equal `world`.
+      expectClosePoint(
+        screenToWorld(cam, { x: w / 2, y: h / 2 }),
+        world,
+      );
+    }
+  });
+
+  it('non-finite inputs return DEFAULT_CAMERA (no NaN)', () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(cameraCenteredOn({ x: bad, y: 0 }, 800, 600, 1)).toBe(
+        DEFAULT_CAMERA,
+      );
+      expect(cameraCenteredOn({ x: 0, y: bad }, 800, 600, 1)).toBe(
+        DEFAULT_CAMERA,
+      );
+      expect(cameraCenteredOn({ x: 0, y: 0 }, bad, 600, 1)).toBe(
+        DEFAULT_CAMERA,
+      );
+      expect(cameraCenteredOn({ x: 0, y: 0 }, 800, bad, 1)).toBe(
+        DEFAULT_CAMERA,
+      );
+      expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, bad)).toBe(
+        DEFAULT_CAMERA,
+      );
+    }
+  });
+
+  it('non-positive zoom returns DEFAULT_CAMERA', () => {
+    expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, 0)).toBe(DEFAULT_CAMERA);
+    expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, -2)).toBe(
+      DEFAULT_CAMERA,
+    );
+  });
+
+  it('returns a new object (not the frozen input) for valid input', () => {
+    const world = Object.freeze({ x: 0, y: 0 });
+    const cam = cameraCenteredOn(world, 1280, 720, 1);
+    expect(cam).not.toBe(DEFAULT_CAMERA);
+    expect(Object.isFrozen(world)).toBe(true);
+    expect(cam).toEqual({ x: -640, y: -360, zoom: 1 });
   });
 });
