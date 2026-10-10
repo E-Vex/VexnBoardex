@@ -92,6 +92,7 @@ export default tseslint.config(
       'src/ui/hudFormat.ts',
       'src/input/wheel.ts',
       'src/input/panController.ts',
+      'src/input/keys.ts',
     ],
     rules: {
       'no-restricted-globals': [
