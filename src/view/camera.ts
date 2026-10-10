@@ -133,3 +133,35 @@ export function visibleWorldRect(
 ): Rect {
   return { x: cam.x, y: cam.y, w: width / cam.zoom, h: height / cam.zoom };
 }
+
+/**
+ * Create a camera so that `world` appears at the centre of a `width × height`
+ * viewport at `zoom` (T-004 R2). The camera's top-left world point is
+ * `(world.x − width / (2 × zoom), world.y − height / (2 × zoom))`.
+ *
+ * Pure: returns a new object, never mutates. Non-finite `world`, `width`,
+ * `height` or `zoom`, or a non-positive zoom, returns `DEFAULT_CAMERA` —
+ * the same no-NaN guarantee as the other camera functions (D-18).
+ */
+export function cameraCenteredOn(
+  world: Point,
+  width: number,
+  height: number,
+  zoom: number,
+): Camera {
+  if (
+    !Number.isFinite(world.x) ||
+    !Number.isFinite(world.y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    !Number.isFinite(zoom) ||
+    zoom <= 0
+  ) {
+    return DEFAULT_CAMERA;
+  }
+  return {
+    x: world.x - width / (2 * zoom),
+    y: world.y - height / (2 * zoom),
+    zoom,
+  };
+}
