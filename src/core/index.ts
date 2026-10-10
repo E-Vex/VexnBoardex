@@ -3,3 +3,9 @@ export * from './geometry';
 export * from './types';
 export { emptyDoc, validateDoc } from './doc';
 export { deepEqual } from './deepEqual';
+export {
+  applyPatch,
+  invertPatch,
+  isEmptyPatch,
+  PatchConflictError,
+} from './patch';
