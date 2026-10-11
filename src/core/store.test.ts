@@ -184,3 +184,51 @@ describe('dispatch — a throwing command leaves the doc unchanged and notifies 
     expect(store.get()).toBe(before);
   });
 });
+
+// T-008 R2 / D-29 — the revision counter.
+describe('getRevision — doc store revision counter (T-008 R2)', () => {
+  it('starts at 0', () => {
+    const store = createDocStore(validDoc());
+    expect(store.getRevision()).toBe(0);
+  });
+
+  it('increments by 1 for every non-empty applied patch', () => {
+    const store = createDocStore(validDoc());
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 1, dy: 0 });
+    expect(store.getRevision()).toBe(1);
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 0, dy: 1 });
+    expect(store.getRevision()).toBe(2);
+    store.dispatch({ type: 'node.delete', ids: ['n1'] });
+    expect(store.getRevision()).toBe(3);
+  });
+
+  it('is unchanged for an empty patch', () => {
+    const store = createDocStore(validDoc());
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 0, dy: 0 });
+    expect(store.getRevision()).toBe(0);
+    store.dispatch({ type: 'node.move', ids: [], dx: 5, dy: 5 });
+    expect(store.getRevision()).toBe(0);
+    store.dispatch({ type: 'node.delete', ids: [] });
+    expect(store.getRevision()).toBe(0);
+  });
+
+  it('is unchanged for a throwing command', () => {
+    const store = createDocStore(validDoc());
+    expect(() =>
+      store.dispatch({ type: 'node.move', ids: ['nope'], dx: 1, dy: 1 }),
+    ).toThrow(CommandError);
+    expect(store.getRevision()).toBe(0);
+
+    // The counter works again after the failed dispatch.
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 1, dy: 0 });
+    expect(store.getRevision()).toBe(1);
+  });
+
+  it('increments exactly once per applied patch, not per subscriber call', () => {
+    const store = createDocStore(validDoc());
+    store.subscribe(() => undefined);
+    store.subscribe(() => undefined);
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 1, dy: 0 });
+    expect(store.getRevision()).toBe(1);
+  });
+});

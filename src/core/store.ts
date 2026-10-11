@@ -15,6 +15,12 @@ export interface DocStore {
   /** Returns the current document. */
   get(): Doc;
   /**
+   * The revision counter (T-008 R2, D-29): starts at 0, increments by 1 for
+   * every non-empty applied patch, unchanged for empty patches and failed
+   * dispatches. Camera and UI state never touch it.
+   */
+  getRevision(): number;
+  /**
    * Compile, apply and store. Returns the patch. An empty patch changes
    * nothing: no notification. If compile or apply throws, the document is
    * unchanged and nobody is notified (atomic).
@@ -36,11 +42,15 @@ export function createDocStore(initial: Doc): DocStore {
   }
 
   let current: Doc = initial;
+  let revision = 0;
   const subscribers = new Set<(doc: Doc, patch: Patch) => void>();
 
   return {
     get() {
       return current;
+    },
+    getRevision() {
+      return revision;
     },
     dispatch(command: Command): Patch {
       // Compile may throw CommandError — doc stays unchanged.
@@ -56,6 +66,7 @@ export function createDocStore(initial: Doc): DocStore {
       }
 
       current = next;
+      revision += 1;
       for (const fn of subscribers) {
         fn(current, patch);
       }
