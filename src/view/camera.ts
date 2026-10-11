@@ -57,11 +57,7 @@ function isUsableCamera(cam: Camera): boolean {
  * pointer, so the camera moves by −d / zoom. Zoom is unchanged. Non-finite
  * deltas are a no-op — the camera comes back unchanged, never NaN.
  */
-export function panBy(
-  cam: Camera,
-  dxScreen: number,
-  dyScreen: number,
-): Camera {
+export function panBy(cam: Camera, dxScreen: number, dyScreen: number): Camera {
   if (
     !isUsableCamera(cam) ||
     !Number.isFinite(dxScreen) ||
@@ -118,6 +114,37 @@ export function zoomByFactorAt(
     return cam;
   }
   return zoomAt(cam, screenPoint, cam.zoom * factor);
+}
+
+/**
+ * The camera expressed as a 2D affine transform (T-007 R3):
+ * `screen = world × scale + (tx, ty)` — i.e.
+ * `screenX = worldX × scale + tx`, `screenY = worldY × scale + ty`.
+ * This is exactly `worldToScreen` in matrix form, so the renderer can use
+ * `ctx.setTransform`/`ctx.transform` with it instead of per-point math (I-02:
+ * the transform still comes from `view/camera`, nowhere else).
+ */
+export interface CameraMatrix {
+  scale: number;
+  tx: number;
+  ty: number;
+}
+
+/**
+ * Convert a camera to its affine matrix form (T-007 R3):
+ * `scale = zoom`, `tx = −cam.x × zoom`, `ty = −cam.y × zoom`.
+ * For every point, `world × scale + (tx, ty)` equals `worldToScreen(cam, world)`.
+ * Negative zero is normalised to `+0` so the identity camera gives a clean
+ * `{scale: 1, tx: 0, ty: 0}` matrix.
+ */
+export function cameraToMatrix(cam: Camera): CameraMatrix {
+  const tx = -cam.x * cam.zoom;
+  const ty = -cam.y * cam.zoom;
+  return {
+    scale: cam.zoom,
+    tx: tx === 0 ? 0 : tx,
+    ty: ty === 0 ? 0 : ty,
+  };
 }
 
 /**
