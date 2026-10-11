@@ -1,19 +1,22 @@
-// VexBoard entry point (T-005 / T-007 R10): wires the camera store, the doc
-// store, the board renderer, the cursor tracker, the HUD, camera input
-// (pan/zoom) and node input (double-click creates a card). Camera and
-// document changes flow through their stores, each triggering a re-render
-// and a HUD update.
+// VexBoard entry point (T-005 / T-007 R10 / T-008 R7): wires the camera
+// store, the doc store, the UI store (selection + drag preview, D-25), the
+// board renderer, the cursor tracker, the HUD, camera input (pan/zoom),
+// node input (double-click creates a card, selects it) and select input
+// (select, move, delete). Camera, document and UI changes flow through
+// their stores, each triggering a re-render and a HUD update.
 import './style.css';
 import { emptyDoc } from './core/doc';
 import { createDocStore } from './core/store';
 import { attachCameraInput } from './input/cameraInput';
 import { createCursorTracker } from './input/cursor';
 import { attachNodeInput } from './input/nodeInput';
+import { attachSelectInput } from './input/selectInput';
 import { createHud } from './ui/hud';
 import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
+import { createUiStore } from './view/uiStore';
 
 // Initial camera: world (0, 0) centered in the viewport at zoom 1 (R6).
 const initialCamera = cameraCenteredOn(
@@ -29,6 +32,10 @@ const store = createCameraStore(initialCamera);
 // The doc store is the single source of truth for the document (T-007 R10,
 // I-03): every mutation goes through dispatch.
 const docStore = createDocStore(emptyDoc());
+
+// The UI store is the single source of truth for selection and the drag
+// preview (T-008 R7, D-25). Never saved, never in history (I-05).
+const uiStore = createUiStore();
 
 // Canvas host: the render callback reads the current camera and document.
 const host = createCanvasHost(({ ctx, width, height }) => {
@@ -67,14 +74,26 @@ const input = attachCameraInput({
   }),
 });
 
-// Node input: double-click creates a card at the cursor through
-// docStore.dispatch (T-007 R8, I-03). IDs are generated here, outside
-// core (D-11).
+// Node input: double-click on empty space creates a card at the cursor
+// through docStore.dispatch (T-007 R8, I-03) and selects it (T-008 D-28).
+// IDs are generated here, outside core (D-11).
 const nodeInput = attachNodeInput({
   canvas: host.canvas,
   cameraStore: store,
   docStore,
+  uiStore,
   newId: () => crypto.randomUUID(),
+});
+
+// Select input: select, move and delete cards (T-008 R6). Space+left and
+// middle-button drags belong to panning, so the select tool stands down
+// whenever the camera input owns the pointer (D-26).
+const selectInput = attachSelectInput({
+  canvas: host.canvas,
+  cameraStore: store,
+  docStore,
+  uiStore,
+  isPanActive: () => input.isPanning() || input.isSpaceHeld(),
 });
 
 // Initial paint — renders on demand, never in a continuous loop (D-10).
@@ -84,3 +103,4 @@ host.requestRender();
 // is only needed for HMR or explicit teardown, neither of which exists yet.
 void input;
 void nodeInput;
+void selectInput;

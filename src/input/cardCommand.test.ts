@@ -5,7 +5,7 @@ import { compileCommand } from '../core/commands';
 import { emptyDoc, validateDoc } from '../core/doc';
 import { applyPatch } from '../core/patch';
 import type { Command, Node } from '../core/types';
-import { createCardAt } from './cardCommand';
+import { createCardAt, shouldCreateCardAt } from './cardCommand';
 
 /** Deterministic PRNG (mulberry32) for the centring property test. */
 function mulberry32(seed: number): () => number {
@@ -83,5 +83,42 @@ describe('createCardAt — command validity (T-007 R7)', () => {
     expect(createCardAt({ x: 5, y: -5 }, 'z')).toEqual(
       createCardAt({ x: 5, y: -5 }, 'z'),
     );
+  });
+});
+
+// T-008 R6 / D-28 — the "may I create here?" decision.
+describe('shouldCreateCardAt (D-28)', () => {
+  /** A doc with one card centred on world (0, 0): rect (-100, -60)–(100, 60). */
+  function docWithCard(): ReturnType<typeof emptyDoc> {
+    const doc = emptyDoc();
+    const patch = compileCommand(doc, createCardAt({ x: 0, y: 0 }, 'c1'));
+    return applyPatch(doc, patch);
+  }
+
+  it('true on empty space (no node under the point)', () => {
+    const doc = docWithCard();
+    expect(shouldCreateCardAt(doc, { x: 500, y: 500 })).toBe(true);
+    expect(shouldCreateCardAt(doc, { x: -1000, y: 0 })).toBe(true);
+  });
+
+  it('true anywhere in an empty doc', () => {
+    expect(shouldCreateCardAt(emptyDoc(), { x: 0, y: 0 })).toBe(true);
+  });
+
+  it('false on a node interior', () => {
+    const doc = docWithCard();
+    expect(shouldCreateCardAt(doc, { x: 0, y: 0 })).toBe(false);
+    expect(shouldCreateCardAt(doc, { x: 99, y: 59 })).toBe(false);
+  });
+
+  it('false on a node edge (edges count as inside hitTest)', () => {
+    const doc = docWithCard();
+    expect(shouldCreateCardAt(doc, { x: -100, y: -60 })).toBe(false);
+    expect(shouldCreateCardAt(doc, { x: 100, y: 60 })).toBe(false);
+  });
+
+  it('false just outside the node', () => {
+    const doc = docWithCard();
+    expect(shouldCreateCardAt(doc, { x: 100.001, y: 0 })).toBe(true);
   });
 });

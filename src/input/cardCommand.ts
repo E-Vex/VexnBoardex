@@ -9,8 +9,9 @@
  */
 
 import type { Point } from '../core/geometry';
+import { hitTest } from '../core/hitTest';
 import { newNode } from '../core/nodeDefaults';
-import type { Command, Id } from '../core/types';
+import type { Command, Doc, Id } from '../core/types';
 
 /**
  * A `node.create` command for a card centred on `world` (R7):
@@ -27,4 +28,14 @@ export function createCardAt(world: Point, id: Id): Command {
       y: world.y - base.h / 2,
     },
   };
+}
+
+/**
+ * The "may I create a card here?" decision (T-008 R6, D-28), pure and
+ * DOM-free: a double-click may create a card only on **empty space** — a
+ * double-click on an existing node creates nothing (reserved for text
+ * editing later).
+ */
+export function shouldCreateCardAt(doc: Doc, world: Point): boolean {
+  return hitTest(doc, world) === null;
 }
