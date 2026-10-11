@@ -49,13 +49,15 @@ function layerBlock(layer) {
 }
 
 export default tseslint.config(
-  { ignores: [
-    'dist/**',
-    'coverage/**',
-    'node_modules/**',
-    'playwright-report/**',
-    'test-results/**',
-  ] },
+  {
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+    ],
+  },
   ...tseslint.configs.recommended,
   ...Object.keys(LAYER_ALLOW).map(layerBlock),
   {
@@ -133,7 +135,7 @@ export default tseslint.config(
         'error',
         {
           selector:
-            "TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]",
+            'TSTypeReference > Identifier[name=/^(Window|Document|Navigator|Performance|Element|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|Event|MouseEvent|PointerEvent|WheelEvent|KeyboardEvent|TouchEvent|DOMRect|DOMPoint|Screen)$/]',
           message:
             'DOM types are forbidden in DOM-free files (PLAN R3/R7, D-18).',
         },
@@ -142,11 +144,12 @@ export default tseslint.config(
   },
   {
     // T-006 R8 / D-23: determinism in core/ — no Date and no Math.random in
-    // non-test core files. Test helpers (*.helper.ts) and tests (*.test.ts)
-    // are excluded; only the seeded PRNG in prng.helper.ts uses Math.random-
-    // free deterministic logic (it uses Math.imul, which is allowed).
+    // non-test core files. Test files (*.test.ts) and the seeded PRNG in
+    // exactly `src/core/prng.helper.ts` are excluded; only that file uses
+    // deterministic PRNG math (Math.imul, which is allowed). The exclusion
+    // names the exact file so a new `*.helper.ts` is NOT auto-excluded.
     files: ['src/core/**/*.ts'],
-    ignores: ['src/core/**/*.test.ts', 'src/core/**/*.helper.ts'],
+    ignores: ['src/core/**/*.test.ts', 'src/core/prng.helper.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
