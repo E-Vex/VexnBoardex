@@ -2,6 +2,7 @@
 // tracker, HUD and camera input (pan/zoom). Camera changes flow through the
 // store, which triggers a re-render and a HUD update.
 import './style.css';
+import { emptyDoc } from './core/doc';
 import { attachCameraInput } from './input/cameraInput';
 import { createCursorTracker } from './input/cursor';
 import { createHud } from './ui/hud';
@@ -22,8 +23,10 @@ const initialCamera = cameraCenteredOn(
 const store = createCameraStore(initialCamera);
 
 // Canvas host: the render callback reads the current camera from the store.
+// (T-007 R10 will replace this placeholder document with a doc store.)
+const initialDoc = emptyDoc();
 const host = createCanvasHost(({ ctx, width, height }) => {
-  renderBoard(ctx, { width, height }, store.get());
+  renderBoard(ctx, { width, height }, store.get(), initialDoc);
 });
 
 // HUD overlay + cursor tracker. The cursor tracker reports CSS-px positions
