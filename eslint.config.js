@@ -89,22 +89,25 @@ export default tseslint.config(
     },
   },
   {
-    // T-003 R3 / T-004 R7 / T-007 R11: DOM-free source files — camera purity,
-    // grid math, HUD formatting, input mapping, text layout and theme
-    // constants enforced by tooling (PLAN D-18). No window/document/navigator/
-    // devicePixelRatio/requestAnimationFrame/performance and no DOM types may
-    // appear in these files.
+    // T-003 R3 / T-004 R7 / T-007 R11 / T-008 R8: DOM-free source files —
+    // camera purity, grid math, HUD formatting, input mapping, text layout,
+    // theme constants, the UI store and the select tool enforced by tooling
+    // (PLAN D-18). No window/document/navigator/devicePixelRatio/
+    // requestAnimationFrame/performance and no DOM types may appear in these
+    // files.
     files: [
       'src/view/camera.ts',
       'src/view/grid.ts',
       'src/view/cameraStore.ts',
       'src/view/textLayout.ts',
       'src/view/theme.ts',
+      'src/view/uiStore.ts',
       'src/ui/hudFormat.ts',
       'src/input/wheel.ts',
       'src/input/panController.ts',
       'src/input/keys.ts',
       'src/input/cardCommand.ts',
+      'src/input/selectTool.ts',
     ],
     rules: {
       'no-restricted-globals': [
