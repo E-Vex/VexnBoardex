@@ -16,7 +16,7 @@ import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
-import { createUiStore } from './view/uiStore';
+import { createUiStore, pruneSelection } from './view/uiStore';
 
 // Initial camera: world (0, 0) centered in the viewport at zoom 1 (R6).
 const initialCamera = cameraCenteredOn(
@@ -37,31 +37,63 @@ const docStore = createDocStore(emptyDoc());
 // preview (T-008 R7, D-25). Never saved, never in history (I-05).
 const uiStore = createUiStore();
 
-// Canvas host: the render callback reads the current camera and document.
+// Canvas host: the render callback reads the current camera, document and
+// UI state (T-008 R7) — the renderer is a pure function of all three
+// (D-10, D-25).
 const host = createCanvasHost(({ ctx, width, height }) => {
-  renderBoard(ctx, { width, height }, store.get(), docStore.get());
+  renderBoard(
+    ctx,
+    { width, height },
+    store.get(),
+    docStore.get(),
+    uiStore.get(),
+  );
 });
 
 // HUD overlay + cursor tracker. The cursor tracker reports CSS-px positions
 // relative to the canvas; its `current()` is read when the camera changes
 // (so the HUD world-coords stay in sync without a redraw).
 const hud = createHud();
-const cursor = createCursorTracker(host.canvas, (pos) => {
-  hud.update(store.get(), pos, docStore.get().order.length);
-});
-hud.update(store.get(), null, docStore.get().order.length);
 
-// Camera changes → re-render (on-demand, D-10) and HUD refresh. The HUD is
-// also refreshed here so the node count stays current (T-007 R10).
-store.subscribe((cam) => {
+/** Refresh every HUD line from the three stores (T-008 R7). */
+function refreshHud(): void {
+  hud.update(
+    store.get(),
+    cursor.current(),
+    docStore.get().order.length,
+    uiStore.get().selection.length,
+    docStore.getRevision(),
+  );
+}
+
+const cursor = createCursorTracker(host.canvas, () => {
+  refreshHud();
+});
+refreshHud();
+
+// Camera changes → re-render (on-demand, D-10) and HUD refresh.
+store.subscribe(() => {
   host.requestRender();
-  hud.update(cam, cursor.current(), docStore.get().order.length);
+  refreshHud();
 });
 
-// Document changes → re-render and HUD refresh (T-007 R10).
+// Document changes → prune the selection to existing ids (D-27), re-render
+// and HUD refresh. Pruning first, so the HUD never shows a stale count.
 docStore.subscribe((doc) => {
+  const selection = uiStore.get().selection;
+  const pruned = pruneSelection(selection, doc);
+  if (pruned !== selection) {
+    uiStore.setSelection(pruned);
+  }
   host.requestRender();
-  hud.update(store.get(), cursor.current(), doc.order.length);
+  refreshHud();
+});
+
+// UI state changes (selection, drag preview) → re-render and HUD refresh
+// (T-008 R7): the drag preview must appear while the pointer moves.
+uiStore.subscribe(() => {
+  host.requestRender();
+  refreshHud();
 });
 
 // Camera input (wheel, keyboard, pointer) pushes new cameras into the store.

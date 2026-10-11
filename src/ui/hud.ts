@@ -1,8 +1,9 @@
 /**
- * HUD overlay (T-004 R4, T-007 R9) — a DOM overlay at the bottom-left showing
- * camera, cursor coordinates and the node count. Creates five lines
- * (`hud-zoom`, `hud-cam`, `hud-world`, `hud-screen`, `hud-nodes`) and updates
- * them via `formatHud`.
+ * HUD overlay (T-004 R4, T-007 R9, T-008 R7) — a DOM overlay at the
+ * bottom-left showing camera, cursor coordinates, the node count, the
+ * selection count and the doc revision. Creates seven lines (`hud-zoom`,
+ * `hud-cam`, `hud-world`, `hud-screen`, `hud-nodes`, `hud-selected`,
+ * `hud-rev`) and updates them via `formatHud`.
  *
  * The overlay is `pointer-events: none` and `user-select: none` so it never
  * interferes with the canvas.
@@ -13,8 +14,14 @@ import type { Camera } from '../view/camera';
 import { formatHud } from './hudFormat';
 
 export interface Hud {
-  /** Re-render the five HUD strings from camera, cursor and node count. */
-  update(camera: Camera, cursorScreen: Point | null, nodeCount: number): void;
+  /** Re-render the seven HUD strings from camera, cursor and counters. */
+  update(
+    camera: Camera,
+    cursorScreen: Point | null,
+    nodeCount: number,
+    selectedCount: number,
+    revision: number,
+  ): void;
   destroy(): void;
 }
 
@@ -46,18 +53,24 @@ export function createHud(parent: HTMLElement = document.body): Hud {
   screenEl.dataset.testid = 'hud-screen';
   const nodesEl = document.createElement('div');
   nodesEl.dataset.testid = 'hud-nodes';
+  const selectedEl = document.createElement('div');
+  selectedEl.dataset.testid = 'hud-selected';
+  const revEl = document.createElement('div');
+  revEl.dataset.testid = 'hud-rev';
 
-  container.append(zoomEl, camEl, worldEl, screenEl, nodesEl);
+  container.append(zoomEl, camEl, worldEl, screenEl, nodesEl, selectedEl, revEl);
   parent.append(container);
 
   return {
-    update(camera, cursorScreen, nodeCount) {
-      const s = formatHud(camera, cursorScreen, nodeCount);
+    update(camera, cursorScreen, nodeCount, selectedCount, revision) {
+      const s = formatHud(camera, cursorScreen, nodeCount, selectedCount, revision);
       zoomEl.textContent = `zoom ${s.zoom}`;
       camEl.textContent = `cam ${s.cam}`;
       worldEl.textContent = `world ${s.world}`;
       screenEl.textContent = `screen ${s.screen}`;
       nodesEl.textContent = `nodes ${s.nodes}`;
+      selectedEl.textContent = `selected ${s.selected}`;
+      revEl.textContent = `rev ${s.rev}`;
     },
     destroy() {
       container.remove();
