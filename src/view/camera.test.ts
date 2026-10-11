@@ -6,6 +6,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
   cameraCenteredOn,
+  cameraToMatrix,
   clampZoom,
   panBy,
   screenToWorld,
@@ -366,7 +367,9 @@ describe('round trips — 200 seeded random cameras and points (brief R4.2)', ()
   const rand = mulberry32(0x5eed01);
   const cameras = Array.from({ length: 200 }, () => randomCamera(rand, 1e5));
   const worldPoints = Array.from({ length: 200 }, () => randomPoint(rand, 1e5));
-  const screenPoints = Array.from({ length: 200 }, () => randomPoint(rand, 1e5));
+  const screenPoints = Array.from({ length: 200 }, () =>
+    randomPoint(rand, 1e5),
+  );
 
   it('world → screen → world restores the world point', () => {
     for (const cam of cameras) {
@@ -407,10 +410,7 @@ describe('cameraCenteredOn (brief R2)', () => {
       const z = randomZoom(rand);
       const cam = cameraCenteredOn(world, w, h, z);
       // screenToWorld(cam, {w/2, h/2}) should equal `world`.
-      expectClosePoint(
-        screenToWorld(cam, { x: w / 2, y: h / 2 }),
-        world,
-      );
+      expectClosePoint(screenToWorld(cam, { x: w / 2, y: h / 2 }), world);
     }
   });
 
@@ -436,9 +436,7 @@ describe('cameraCenteredOn (brief R2)', () => {
 
   it('non-positive zoom returns DEFAULT_CAMERA', () => {
     expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, 0)).toBe(DEFAULT_CAMERA);
-    expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, -2)).toBe(
-      DEFAULT_CAMERA,
-    );
+    expect(cameraCenteredOn({ x: 0, y: 0 }, 800, 600, -2)).toBe(DEFAULT_CAMERA);
   });
 
   it('returns a new object (not the frozen input) for valid input', () => {
@@ -447,5 +445,44 @@ describe('cameraCenteredOn (brief R2)', () => {
     expect(cam).not.toBe(DEFAULT_CAMERA);
     expect(Object.isFrozen(world)).toBe(true);
     expect(cam).toEqual({ x: -640, y: -360, zoom: 1 });
+  });
+});
+
+// T-007 R3 — cameraToMatrix: screen = world × scale + (tx, ty).
+describe('cameraToMatrix (T-007 R3)', () => {
+  it('known camera: cam {100, 50, zoom 2} → {scale 2, tx −200, ty −100}', () => {
+    // Worked example from the camera header: world (110, 60) → screen (20, 20).
+    // 110 × 2 + (−200) = 20 and 60 × 2 + (−100) = 20. ✓
+    const m = cameraToMatrix({ x: 100, y: 50, zoom: 2 });
+    expect(m).toEqual({ scale: 2, tx: -200, ty: -100 });
+  });
+
+  it('identity camera {0, 0, zoom 1} → {scale 1, tx 0, ty 0}', () => {
+    expect(cameraToMatrix({ x: 0, y: 0, zoom: 1 })).toEqual({
+      scale: 1,
+      tx: 0,
+      ty: 0,
+    });
+  });
+
+  it('for many seeded cameras and points, world × scale + (tx, ty) equals worldToScreen', () => {
+    const rand = mulberry32(0x7ee0a7);
+    for (let i = 0; i < 500; i++) {
+      const cam = randomCamera(rand, 1e5);
+      const m = cameraToMatrix(cam);
+      // The matrix components match the definition (tolerance handles -0).
+      expect(close(m.scale, cam.zoom)).toBe(true);
+      expect(close(m.tx, -cam.x * cam.zoom)).toBe(true);
+      expect(close(m.ty, -cam.y * cam.zoom)).toBe(true);
+      // Applying the matrix to a world point equals worldToScreen.
+      for (let k = 0; k < 5; k++) {
+        const world = randomPoint(rand, 1e5);
+        const byMatrix: Point = {
+          x: world.x * m.scale + m.tx,
+          y: world.y * m.scale + m.ty,
+        };
+        expectClosePoint(byMatrix, worldToScreen(cam, world));
+      }
+    }
   });
 });

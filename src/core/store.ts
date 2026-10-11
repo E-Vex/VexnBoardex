@@ -8,7 +8,7 @@
 
 import type { Command, Doc, Patch } from './types';
 import { validateDoc } from './doc';
-import { applyPatch } from './patch';
+import { applyPatch, isEmptyPatch } from './patch';
 import { compileCommand } from './commands';
 
 export interface DocStore {
@@ -49,13 +49,9 @@ export function createDocStore(initial: Doc): DocStore {
       // applyPatch may throw PatchConflictError — doc stays unchanged.
       const next = applyPatch(current, patch);
 
-      // Empty patch: no change, no notification.
-      if (
-        Object.keys(patch.nodes).length === 0 &&
-        Object.keys(patch.edges).length === 0 &&
-        Object.keys(patch.groups).length === 0 &&
-        patch.order === undefined
-      ) {
+      // Empty patch: no change, no notification (isEmptyPatch is the one
+      // definition of "empty" — T-007 Part A-3).
+      if (isEmptyPatch(patch)) {
         return patch;
       }
 

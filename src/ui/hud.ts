@@ -1,7 +1,8 @@
 /**
- * HUD overlay (T-004 R4) — a DOM overlay at the bottom-left showing camera and
- * cursor coordinates. Creates four lines (`hud-zoom`, `hud-cam`, `hud-world`,
- * `hud-screen`) and updates them via `formatHud`.
+ * HUD overlay (T-004 R4, T-007 R9) — a DOM overlay at the bottom-left showing
+ * camera, cursor coordinates and the node count. Creates five lines
+ * (`hud-zoom`, `hud-cam`, `hud-world`, `hud-screen`, `hud-nodes`) and updates
+ * them via `formatHud`.
  *
  * The overlay is `pointer-events: none` and `user-select: none` so it never
  * interferes with the canvas.
@@ -12,8 +13,8 @@ import type { Camera } from '../view/camera';
 import { formatHud } from './hudFormat';
 
 export interface Hud {
-  /** Re-render the four HUD strings from the current camera and cursor. */
-  update(camera: Camera, cursorScreen: Point | null): void;
+  /** Re-render the five HUD strings from camera, cursor and node count. */
+  update(camera: Camera, cursorScreen: Point | null, nodeCount: number): void;
   destroy(): void;
 }
 
@@ -43,17 +44,20 @@ export function createHud(parent: HTMLElement = document.body): Hud {
   worldEl.dataset.testid = 'hud-world';
   const screenEl = document.createElement('div');
   screenEl.dataset.testid = 'hud-screen';
+  const nodesEl = document.createElement('div');
+  nodesEl.dataset.testid = 'hud-nodes';
 
-  container.append(zoomEl, camEl, worldEl, screenEl);
+  container.append(zoomEl, camEl, worldEl, screenEl, nodesEl);
   parent.append(container);
 
   return {
-    update(camera, cursorScreen) {
-      const s = formatHud(camera, cursorScreen);
+    update(camera, cursorScreen, nodeCount) {
+      const s = formatHud(camera, cursorScreen, nodeCount);
       zoomEl.textContent = `zoom ${s.zoom}`;
       camEl.textContent = `cam ${s.cam}`;
       worldEl.textContent = `world ${s.world}`;
       screenEl.textContent = `screen ${s.screen}`;
+      nodesEl.textContent = `nodes ${s.nodes}`;
     },
     destroy() {
       container.remove();

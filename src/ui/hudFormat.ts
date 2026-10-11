@@ -1,19 +1,22 @@
 /**
  * HUD formatting — pure, DOM-free (PLAN D-06, R4, R7).
  *
- * Converts camera and cursor state into the four strings the HUD overlay
- * displays. No DOM, no state — just formatting and `screenToWorld` (I-02).
+ * Converts camera, cursor and node-count state into the five strings the HUD
+ * overlay displays. No DOM, no state — just formatting and `screenToWorld`
+ * (I-02).
  */
 
 import type { Point } from '../core/geometry';
 import { type Camera, screenToWorld } from '../view/camera';
 
-/** The four strings the HUD overlay shows. */
+/** The five strings the HUD overlay shows. */
 export interface HudStrings {
   zoom: string;
   cam: string;
   world: string;
   screen: string;
+  /** The node count as a plain integer string (T-007 R9). */
+  nodes: string;
 }
 
 const DASH = '—';
@@ -48,25 +51,29 @@ function fmtZoom(z: number): string {
 }
 
 /**
- * Returns the four HUD strings for the given camera and cursor position.
+ * Returns the five HUD strings for the given camera, cursor position and
+ * node count (T-007 R9).
  *
  * - `zoom`: integer percent ("100%").
  * - `cam`: "x, y" with one decimal.
  * - `world`: "x, y" with one decimal, or "—" when there is no cursor.
  *   Computed via `screenToWorld` from `view/camera` (I-02), nothing else.
  * - `screen`: "x, y" rounded to integers, or "—" when there is no cursor.
+ * - `nodes`: the node count as a plain integer ("0", "1", …).
  *
  * "-0.0" and "-0" are never output; they are normalized to "0.0" / "0".
  */
 export function formatHud(
   camera: Camera,
   cursorScreen: Point | null,
+  nodeCount: number,
 ): HudStrings {
   const zoom = fmtZoom(camera.zoom);
   const cam = `${fmt1(camera.x)}, ${fmt1(camera.y)}`;
+  const nodes = fmtInt(nodeCount);
 
   if (cursorScreen === null) {
-    return { zoom, cam, world: DASH, screen: DASH };
+    return { zoom, cam, world: DASH, screen: DASH, nodes };
   }
 
   const world = screenToWorld(camera, cursorScreen);
@@ -75,5 +82,6 @@ export function formatHud(
     cam,
     world: `${fmt1(world.x)}, ${fmt1(world.y)}`,
     screen: `${fmtInt(cursorScreen.x)}, ${fmtInt(cursorScreen.y)}`,
+    nodes,
   };
 }
