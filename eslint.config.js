@@ -104,6 +104,7 @@ export default tseslint.config(
       'src/input/wheel.ts',
       'src/input/panController.ts',
       'src/input/keys.ts',
+      'src/input/cardCommand.ts',
     ],
     rules: {
       'no-restricted-globals': [
