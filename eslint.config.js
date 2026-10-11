@@ -89,14 +89,17 @@ export default tseslint.config(
     },
   },
   {
-    // T-003 R3 / T-004 R7: DOM-free source files — camera purity and grid
-    // math enforced by tooling (PLAN D-18). No window/document/navigator/
+    // T-003 R3 / T-004 R7 / T-007 R11: DOM-free source files — camera purity,
+    // grid math, HUD formatting, input mapping, text layout and theme
+    // constants enforced by tooling (PLAN D-18). No window/document/navigator/
     // devicePixelRatio/requestAnimationFrame/performance and no DOM types may
     // appear in these files.
     files: [
       'src/view/camera.ts',
       'src/view/grid.ts',
       'src/view/cameraStore.ts',
+      'src/view/textLayout.ts',
+      'src/view/theme.ts',
       'src/ui/hudFormat.ts',
       'src/input/wheel.ts',
       'src/input/panController.ts',

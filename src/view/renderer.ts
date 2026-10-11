@@ -12,17 +12,9 @@ import type { Point, Rect } from '../core/geometry';
 import { rectContains } from '../core/geometry';
 import { type Camera, visibleWorldRect, worldToScreen } from './camera';
 import { dotCount, dotIndexRange, gridStep } from './grid';
+import { BG_COLOR, GRID_DOT_COLOR, ORIGIN_MARKER_COLOR } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
-
-/** Solid background colour. */
-const BG_COLOR = '#1e1e24';
-
-/** Grid dot colour (slightly lighter than the background). */
-const GRID_DOT_COLOR = '#3a3a46';
-
-/** Origin cross marker colour. */
-const ORIGIN_MARKER_COLOR = '#e8e8ef';
 
 /** Half-size of the origin cross, in CSS pixels (total span = 2 × this). */
 const ORIGIN_MARKER_HALF = 4;

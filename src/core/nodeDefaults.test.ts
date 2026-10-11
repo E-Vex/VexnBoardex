@@ -62,7 +62,7 @@ describe('newNode — text, color, tags, groupId (T-007 R2)', () => {
     for (const c of colors) {
       const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(c);
       expect(m, `${c} is a #rrggbb hex literal`).not.toBeNull();
-      const [r, g, b] = m!.slice(1).map((h) => parseInt(h, 16));
+      const [r = 0, g = 0, b = 0] = m!.slice(1).map((h) => parseInt(h, 16));
       expect((r + g + b) / 3).toBeGreaterThanOrEqual(0xd0);
     }
   });
