@@ -64,9 +64,16 @@ function randomDoc(rng: () => number): Doc {
   }
   const nodeIds = Object.keys(doc.nodes);
   const edgeCount = randInt(rng, 0, 10);
+  // D-30: no two edges share the same (from, to) pair — the random initial
+  // doc must be valid under validateDoc, which now rejects duplicates.
+  const seenPairs = new Set<string>();
   for (let i = 0; i < edgeCount; i++) {
     const e = makeEdge(rng, `e${i}`, nodeIds);
-    if (e) doc.edges[e.id] = e;
+    if (!e) continue;
+    const pairKey = JSON.stringify([e.from.node, e.to.node]);
+    if (seenPairs.has(pairKey)) continue;
+    seenPairs.add(pairKey);
+    doc.edges[e.id] = e;
   }
   return doc;
 }
