@@ -1,9 +1,14 @@
 /**
- * Board renderer — a pure function of (ctx, viewport, camera, doc) (PLAN
- * D-10, I-07, T-007 R6). Draws the background, a dotted grid, an origin
- * cross marker, then the document's nodes in `doc.order` order (bottom →
- * top, D-21). Edges will later be drawn between the grid and the nodes.
- * Keeps no state of its own.
+ * Board renderer — a pure function of (ctx, viewport, camera, doc, ui)
+ * (PLAN D-10, I-07, T-007 R6, T-008 R5). Draws the background, a dotted
+ * grid, an origin cross marker, then the document's nodes in `doc.order`
+ * order (bottom → top, D-21). Edges will later be drawn between the grid
+ * and the nodes. Keeps no state of its own.
+ *
+ * The UI layer (`ui` = selection + drag preview, D-25) only affects how a
+ * node is drawn — never the document: nodes in `ui.drag.ids` are drawn
+ * offset by `(dx, dy)` (a preview, I-04) and selected nodes get an accent
+ * outline outside their rect (T-008 R5).
  *
  * `ctx` must already be scaled so the caller draws in CSS pixels (the canvas
  * host sets up the DPR transform). Any rounding happens only at draw time
@@ -24,6 +29,7 @@ import {
 } from './camera';
 import { dotCount, dotIndexRange, gridStep } from './grid';
 import { layoutText } from './textLayout';
+import type { UiState } from './uiStore';
 import {
   BG_COLOR,
   CORNER_RADIUS,
@@ -37,6 +43,9 @@ import {
   NODE_PADDING,
   NODE_TEXT_COLOR,
   ORIGIN_MARKER_COLOR,
+  SELECTION_COLOR,
+  SELECTION_OUTLINE_OFFSET,
+  SELECTION_OUTLINE_WIDTH,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -61,10 +70,7 @@ export interface Viewport {
 
 // ── Node drawing ──────────────────────────────────────────────────────────
 
-/** The node's bounding rect as a world-space Rect. */
-function nodeRect(node: Node): { x: number; y: number; w: number; h: number } {
-  return { x: node.x, y: node.y, w: node.w, h: node.h };
-}
+// (The node's bounding rect is built inline where culling needs it.)
 
 /**
  * Draw one node in world coordinates (R6): a rounded rectangle filled with
@@ -73,14 +79,20 @@ function nodeRect(node: Node): { x: number; y: number; w: number; h: number } {
  * the lines that fit the node height. Text is skipped entirely when
  * `FONT_SIZE × scale` is below the minimum on-screen size (text LOD).
  *
- * `scale` is the camera zoom from the transform (not recomputed here).
+ * `dx`/`dy` (T-008 R5) shift the whole node by the drag preview offset in
+ * world units — the document is not touched. `scale` is the camera zoom
+ * from the transform (not recomputed here).
  */
 function drawNode(
   ctx: CanvasRenderingContext2D,
   node: Node,
   scale: number,
+  dx = 0,
+  dy = 0,
 ): void {
-  const { x, y, w, h } = node;
+  const { x: nx, y: ny, w, h } = node;
+  const x = nx + dx;
+  const y = ny + dy;
 
   // Rounded rectangle via arcTo (R6), radius clamped to half the shorter side.
   const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
@@ -125,13 +137,50 @@ function drawNode(
   }
 }
 
+// ── Selection outline (T-008 R5) ───────────────────────────────────────────
+
+/**
+ * Stroke the selection outline for a node whose rect is `(x, y, w, h)` in
+ * world coordinates: an accent rounded rect `SELECTION_OUTLINE_OFFSET`
+ * screen px outside the node, `SELECTION_OUTLINE_WIDTH` screen px wide —
+ * both divided by `scale` (the zoom from `cameraToMatrix`), so they paint
+ * the same size on screen at any zoom. Drawn entirely OUTSIDE the node
+ * rect, so the fill area is unchanged and T-007's pixel probes stay valid.
+ */
+function drawSelectionOutline(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  scale: number,
+): void {
+  const off = SELECTION_OUTLINE_OFFSET / scale;
+  const r = Math.min(CORNER_RADIUS, w / 2, h / 2) + off;
+  ctx.beginPath();
+  ctx.moveTo(x - off + r, y - off);
+  ctx.arcTo(x + w + off, y - off, x + w + off, y + h + off, r);
+  ctx.arcTo(x + w + off, y + h + off, x - off, y + h + off, r);
+  ctx.arcTo(x - off, y + h + off, x - off, y - off, r);
+  ctx.arcTo(x - off, y - off, x + w + off, y - off, r);
+  ctx.closePath();
+  ctx.lineWidth = SELECTION_OUTLINE_WIDTH / scale;
+  ctx.strokeStyle = SELECTION_COLOR;
+  ctx.stroke();
+}
+
 // ── Renderer ─────────────────────────────────────────────────────────────
 
 /**
- * Draws the board (T-007 R6): background fill, grid dots (one path + one
- * fill), a small cross at world (0, 0) when visible, then the nodes in
- * `doc.order` order (bottom → top). Nodes are culled against the visible
- * world rect and drawn in world coordinates through the camera transform.
+ * Draws the board (T-007 R6, T-008 R5): background fill, grid dots (one
+ * path + one fill), a small cross at world (0, 0) when visible, then the
+ * nodes in `doc.order` order (bottom → top). Nodes are culled against the
+ * visible world rect and drawn in world coordinates through the camera
+ * transform.
+ *
+ * `ui` (D-25) is optional and defaults to an empty selection with no drag,
+ * so callers without UI state keep working; the document itself is never
+ * read-modified-written here (I-07, D-10).
  *
  * The grid is skipped entirely when `dotCount` exceeds `MAX_DOTS` (safety
  * cap, R3). The function keeps no state (I-07, D-10).
@@ -141,6 +190,7 @@ export function renderBoard(
   viewport: Viewport,
   camera: Camera,
   doc: Doc,
+  ui: UiState = { selection: [], drag: null },
 ): void {
   const { width, height } = viewport;
 
@@ -188,14 +238,30 @@ export function renderBoard(
   // camera transform (I-02: the transform comes from cameraToMatrix only).
   // Edges will later be drawn here, between the grid and the nodes.
   const m = cameraToMatrix(camera);
+  const selected = new Set(ui.selection);
+  const drag = ui.drag;
+  const draggedIds = drag !== null ? new Set(drag.ids) : null;
+  const dragDx = drag !== null ? drag.dx : 0;
+  const dragDy = drag !== null ? drag.dy : 0;
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const id of doc.order) {
     const node = doc.nodes[id];
     if (node === undefined) continue; // defensive: order must be a permutation
-    // Culling (R6): skip nodes whose rect does not intersect the visible rect.
-    if (!rectsIntersect(nodeRect(node), visible)) continue;
-    drawNode(ctx, node, m.scale);
+    // Drag preview offset (R5): drawn at the offset position; the document
+    // is not touched. Culling uses the rect actually drawn.
+    const isDragged = draggedIds !== null && draggedIds.has(id);
+    const dx = isDragged ? dragDx : 0;
+    const dy = isDragged ? dragDy : 0;
+    const x = node.x + dx;
+    const y = node.y + dy;
+    // Culling (R6): skip nodes whose drawn rect does not intersect the
+    // visible rect — a selected node is culled like any other (R5).
+    if (!rectsIntersect({ x, y, w: node.w, h: node.h }, visible)) continue;
+    drawNode(ctx, node, m.scale, dx, dy);
+    if (selected.has(id)) {
+      drawSelectionOutline(ctx, x, y, node.w, node.h, m.scale);
+    }
   }
   ctx.restore();
 }

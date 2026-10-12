@@ -51,3 +51,26 @@ export const NODE_TEXT_COLOR = '#23262e';
 
 /** Node border colour — a translucent dark ink over the fill. */
 export const NODE_BORDER_COLOR = 'rgba(35, 38, 46, 0.35)';
+
+// ── Selection (T-008 R5) ───────────────────────────────────────────────────
+
+/**
+ * Accent colour for the selection outline and future UI highlights. A warm
+ * amber that reads clearly against both the dark board and the light node
+ * fills.
+ */
+export const SELECTION_COLOR = '#f5a623';
+
+/**
+ * Selection outline width in CSS px on screen (R5): the stroke is
+ * `SELECTION_OUTLINE_WIDTH / zoom` world units wide, so it paints 2 screen
+ * px at any zoom.
+ */
+export const SELECTION_OUTLINE_WIDTH = 2;
+
+/**
+ * Selection outline offset in CSS px on screen (R5): the outline path runs
+ * this far outside the node rect, so the node's fill area is unchanged and
+ * T-007's pixel probes stay valid.
+ */
+export const SELECTION_OUTLINE_OFFSET = 3;

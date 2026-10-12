@@ -5,6 +5,11 @@ import type { Doc, Node, NodeKind } from '../core/types';
 import { cameraCenteredOn, visibleWorldRect, type Camera } from './camera';
 import { dotCount, dotIndexRange, gridStep } from './grid';
 import { renderBoard } from './renderer';
+import {
+  NODE_BORDER_COLOR,
+  ORIGIN_MARKER_COLOR,
+  SELECTION_COLOR,
+} from './theme';
 
 /**
  * A recording stub for `CanvasRenderingContext2D`. Every method call and
@@ -303,5 +308,187 @@ describe('renderBoard — empty document (T-007 R12)', () => {
     // Background + grid are still drawn exactly once.
     expect(countCalls(ctx, 'fillRect')).toBe(1);
     expect(countCalls(ctx, 'fill')).toBe(1);
+  });
+});
+
+// T-008 R9 — selection outline and drag preview.
+describe('renderBoard — selection outline (T-008 R9)', () => {
+  const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+
+  it('a selected node gets an outline stroke after its own fill', () => {
+    const node = makeNode('a', { x: -100, y: -60 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
+      selection: ['a'],
+      drag: null,
+    });
+
+    // Origin marker (1) + node border (1) + outline (1) = 3 strokes total.
+    expect(countCalls(ctx, 'stroke')).toBe(3);
+    // Stroke styles in order: origin, node border, then the accent outline.
+    const styles = ctx.calls
+      .filter((c) => c.name === 'strokeStyle')
+      .map((c) => c.args[0]);
+    expect(styles).toEqual([
+      ORIGIN_MARKER_COLOR,
+      NODE_BORDER_COLOR,
+      SELECTION_COLOR,
+    ]);
+    // The outline stroke happens after the node's fill call (the last fill:
+    // the grid fill came earlier, the node fill is last).
+    const outlineStrokeIdx = ctx.calls.findIndex(
+      (c) => c.name === 'strokeStyle' && c.args[0] === SELECTION_COLOR,
+    );
+    expect(outlineStrokeIdx).toBeGreaterThan(lastIndex(ctx, 'fill'));
+  });
+
+  it('an unselected node gets no outline stroke', () => {
+    const node = makeNode('a', { x: -100, y: -60 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
+      selection: [],
+      drag: null,
+    });
+
+    // Origin marker + the node's own border stroke, nothing more.
+    expect(countCalls(ctx, 'stroke')).toBe(2);
+    const styles = ctx.calls
+      .filter((c) => c.name === 'strokeStyle')
+      .map((c) => c.args[0]);
+    expect(styles).toEqual([ORIGIN_MARKER_COLOR, NODE_BORDER_COLOR]);
+  });
+
+  it('the outline path is drawn outside the node rect (3 screen px offset)', () => {
+    // Node at (-100, -60), 200×120, zoom 1 → offset 3, radius 8 + 3 = 11.
+    const node = makeNode('a', { x: -100, y: -60 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
+      selection: ['a'],
+      drag: null,
+    });
+
+    // The outline path starts at (x - 3 + 11, y - 3) = (-92, -63)…
+    const outlineMoveTo = ctx.calls.find(
+      (c) => c.name === 'moveTo' && c.args[0] === -92 && c.args[1] === -63,
+    );
+    expect(outlineMoveTo).toBeDefined();
+    // …and its first arcTo targets the expanded corner (x+w+3, y-3).
+    const outlineArcTo = ctx.calls.find(
+      (c) => c.name === 'arcTo' && c.args[0] === 103 && c.args[1] === -63,
+    );
+    expect(outlineArcTo).toBeDefined();
+  });
+
+  it('outline width × zoom stays 2 at zooms 0.5, 1 and 4', () => {
+    for (const zoom of [0.5, 1, 4]) {
+      const zc = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, zoom);
+      const node = makeNode('a', { x: -100, y: -60 });
+      const ctx = createStubCtx();
+      renderBoard(ctx, { width: 1280, height: 720 }, zc, docOf(node), {
+        selection: ['a'],
+        drag: null,
+      });
+
+      const lineWidths = ctx.calls
+        .filter((c) => c.name === 'lineWidth')
+        .map((c) => c.args[0] as number);
+      // The outline's world-space line width is 2 / zoom…
+      expect(lineWidths).toContain(2 / zoom);
+      // …so every outline stroke paints exactly 2 screen px.
+      const outlineWidth = lineWidths.find((v) => v === 2 / zoom)!;
+      expect(outlineWidth * zoom).toBe(2);
+    }
+  });
+
+  it('an off-screen selected node is culled like any other', () => {
+    const off = makeNode('off', { x: 5000, y: 5000 });
+    const on = makeNode('on', { x: -100, y: -60 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(off, on), {
+      selection: ['off', 'on'],
+      drag: null,
+    });
+
+    // Only the visible node: 2 nodes' worth of paths would be 8 arcTo.
+    expect(countCalls(ctx, 'arcTo')).toBe(8); // 4 (node) + 4 (outline) for `on`
+    // Its text is drawn, the off-screen node's is not.
+    const textArgs = ctx.calls
+      .filter((c) => c.name === 'fillText')
+      .map((c) => c.args[0]);
+    expect(textArgs).toEqual(['text of on']);
+  });
+});
+
+describe('renderBoard — drag preview (T-008 R9)', () => {
+  const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+
+  it('a dragged node is drawn at the offset position; a non-dragged one is not', () => {
+    const a = makeNode('a', { x: -300, y: -100 });
+    const b = makeNode('b', { x: 100, y: -100 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
+      selection: ['a'],
+      drag: { ids: ['a'], dx: 50, dy: 25 },
+    });
+
+    // Node a is drawn at (-300+50, -100+25) = (-250, -75): its first arcTo
+    // targets the corner (x+w, y) = (-50, -75)…
+    const arcTos = ctx.calls.filter((c) => c.name === 'arcTo');
+    // a (selected) draws 4 path arcTos then 4 outline arcTos; b draws 4.
+    expect(arcTos).toHaveLength(12);
+    expect(arcTos[0]!.args).toEqual([-50, -75, -50, 45, 8]);
+    // …while node b's first arcTo (index 8, after a's path + outline) is at
+    // its own unoffset position (100+200, -100) = (300, -100).
+    expect(arcTos[8]!.args).toEqual([300, -100, 300, 20, 8]);
+
+    // The drag preview is drawn, not committed: the document is untouched.
+    expect(a.x).toBe(-300);
+    expect(a.y).toBe(-100);
+    expect(b.x).toBe(100);
+  });
+
+  it("the dragged node's text is drawn at the offset position too", () => {
+    const a = makeNode('a', { x: -300, y: -100 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
+      selection: [],
+      drag: { ids: ['a'], dx: 50, dy: 25 },
+    });
+
+    const fillText = ctx.calls.find((c) => c.name === 'fillText')!;
+    expect(fillText.args[0]).toBe('text of a');
+    expect(fillText.args[1]).toBe(-300 + 50 + 12); // x + dx + padding
+    expect(fillText.args[2]).toBe(-100 + 25 + 12); // y + dy + padding
+  });
+
+  it('drawing order is unchanged by a drag', () => {
+    const a = makeNode('a', { x: -300, y: -100 });
+    const b = makeNode('b', { x: 100, y: -100 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
+      selection: ['a'],
+      drag: { ids: ['a'], dx: 50, dy: 25 },
+    });
+
+    // a is first in doc.order and is still drawn (and texted) first.
+    const textArgs = ctx.calls
+      .filter((c) => c.name === 'fillText')
+      .map((c) => c.args[0]);
+    expect(textArgs).toEqual(['text of a', 'text of b']);
+    // The first node path on the canvas belongs to a (offset position).
+    const firstArcTo = ctx.calls.find((c) => c.name === 'arcTo')!;
+    expect(firstArcTo.args[0]).toBe(-50); // a's right edge at the offset
+  });
+
+  it('a node dragged out of the visible rect is culled', () => {
+    const a = makeNode('a', { x: -300, y: -100 });
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
+      selection: ['a'],
+      drag: { ids: ['a'], dx: 9000, dy: 9000 },
+    });
+
+    expect(countCalls(ctx, 'arcTo')).toBe(0);
+    expect(countCalls(ctx, 'fillText')).toBe(0);
   });
 });

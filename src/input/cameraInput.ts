@@ -34,6 +34,10 @@ export interface CameraInputOptions {
 
 export interface CameraInput {
   detach(): void;
+  /** True while Space is held (T-008 R6): a pan is imminent or active. */
+  isSpaceHeld(): boolean;
+  /** True while a pan gesture is actually in progress (T-008 R6). */
+  isPanning(): boolean;
 }
 
 /**
@@ -235,6 +239,12 @@ export function attachCameraInput(
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
+    },
+    isSpaceHeld() {
+      return panState.spaceHeld;
+    },
+    isPanning() {
+      return panState.mode === 'panning';
     },
   };
 }
