@@ -9,7 +9,7 @@
 import type { Command } from './types';
 import type { Doc } from './types';
 import type { Patch } from './types';
-import type { Edge, Id, Node } from './types';
+import type { Anchor, Edge, Id, Node } from './types';
 
 /** Thrown when a command cannot be compiled (PLAN D-22). */
 export class CommandError extends Error {
@@ -20,6 +20,15 @@ export class CommandError extends Error {
 }
 
 const VALID_KINDS = new Set(['text', 'sticky', 'card', 'image']);
+
+/** The five valid edge anchors (D-30). Checked at runtime — commands are data. */
+const VALID_ANCHORS = new Set<Anchor>([
+  'auto',
+  'top',
+  'right',
+  'bottom',
+  'left',
+]);
 
 /** An empty patch (no entity changes, no order). */
 function emptyPatch(): Patch {
@@ -188,6 +197,103 @@ function compileDelete(doc: Doc, ids: Id[]): Patch {
 }
 
 /**
+ * Compile `edge.create`: adds the edge. Both nodes must exist, no
+ * self-edge, no duplicate (from, to) pair — the reverse direction is
+ * allowed — each anchor must be one of the five (checked at runtime:
+ * commands are data), and an optional `label` must be a string (T-009 R2,
+ * D-30). Nodes and `order` are untouched.
+ */
+function compileEdgeCreate(doc: Doc, edge: Edge): Patch {
+  if (edge.id === '') {
+    throw new CommandError('edge.create: id is empty');
+  }
+  if (Object.prototype.hasOwnProperty.call(doc.edges, edge.id)) {
+    throw new CommandError(`edge.create: id "${edge.id}" already exists`);
+  }
+  if (
+    !isString(edge.from?.node) ||
+    !Object.prototype.hasOwnProperty.call(doc.nodes, edge.from.node)
+  ) {
+    throw new CommandError(
+      `edge.create: from.node "${String(edge.from?.node)}" does not exist`,
+    );
+  }
+  if (
+    !isString(edge.to?.node) ||
+    !Object.prototype.hasOwnProperty.call(doc.nodes, edge.to.node)
+  ) {
+    throw new CommandError(
+      `edge.create: to.node "${String(edge.to?.node)}" does not exist`,
+    );
+  }
+  if (edge.from.node === edge.to.node) {
+    throw new CommandError(
+      `edge.create: edge "${edge.id}" connects a node to itself`,
+    );
+  }
+  for (const [id, existing] of Object.entries(doc.edges)) {
+    if (
+      existing.from.node === edge.from.node &&
+      existing.to.node === edge.to.node
+    ) {
+      throw new CommandError(
+        `edge.create: edge "${edge.id}" repeats the (from, to) pair of edge "${id}"`,
+      );
+    }
+  }
+  if (!VALID_ANCHORS.has(edge.from.anchor)) {
+    throw new CommandError(
+      `edge.create: from.anchor "${String(edge.from.anchor)}" is not one of 'auto' | 'top' | 'right' | 'bottom' | 'left'`,
+    );
+  }
+  if (!VALID_ANCHORS.has(edge.to.anchor)) {
+    throw new CommandError(
+      `edge.create: to.anchor "${String(edge.to.anchor)}" is not one of 'auto' | 'top' | 'right' | 'bottom' | 'left'`,
+    );
+  }
+  if (edge.label !== undefined && !isString(edge.label)) {
+    throw new CommandError('edge.create: label is not a string');
+  }
+
+  return { nodes: {}, edges: { [edge.id]: { after: edge } }, groups: {} };
+}
+
+/**
+ * Compile `edge.delete`: removes the listed edges. Duplicates are ignored;
+ * an unknown id throws; empty `ids` returns an empty patch (T-009 R2).
+ * Nodes and `order` are untouched.
+ */
+function compileEdgeDelete(doc: Doc, ids: Id[]): Patch {
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.edges, id)) {
+      throw new CommandError(`edge.delete: unknown id "${id}"`);
+    }
+  }
+
+  // No-op: empty ids.
+  if (uniqueIds.length === 0) {
+    return emptyPatch();
+  }
+
+  const edges: Patch['edges'] = {};
+  for (const id of uniqueIds) {
+    edges[id] = { before: doc.edges[id]! };
+  }
+  return { nodes: {}, edges, groups: {} };
+}
+
+/**
  * Compile a command into a patch (T-006 R5, PLAN D-22).
  *
  * Pure and strict: never mutates `doc` or `command`. Throws `CommandError`
@@ -201,6 +307,10 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileMove(doc, command.ids, command.dx, command.dy);
     case 'node.delete':
       return compileDelete(doc, command.ids);
+    case 'edge.create':
+      return compileEdgeCreate(doc, command.edge);
+    case 'edge.delete':
+      return compileEdgeDelete(doc, command.ids);
     default:
       throw new CommandError(
         `unknown command type: ${(command as { type: string }).type}`,

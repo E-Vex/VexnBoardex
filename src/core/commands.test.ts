@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Command, Doc, Node } from './types';
-import { emptyDoc } from './doc';
+import type { Command, Doc, Edge, EdgeEndpoint, Node } from './types';
+import { emptyDoc, validateDoc } from './doc';
 import { deepEqual } from './deepEqual';
-import { applyPatch } from './patch';
+import { applyPatch, invertPatch, isEmptyPatch } from './patch';
 import { CommandError, compileCommand } from './commands';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
@@ -28,6 +28,34 @@ function docWith(...nodes: Node[]): Doc {
     d.order.push(n.id);
   }
   return d;
+}
+
+function edge(
+  id: string,
+  from: string,
+  to: string,
+  overrides: Partial<Edge> = {},
+): Edge {
+  return {
+    id,
+    from: { node: from, anchor: 'auto' },
+    to: { node: to, anchor: 'auto' },
+    ...overrides,
+  };
+}
+
+/** Freeze deeply so any mutation throws (T-009 R5). */
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  Object.freeze(obj);
+  if (Array.isArray(obj)) {
+    for (const el of obj) deepFreeze(el);
+  } else {
+    for (const v of Object.values(obj as Record<string, unknown>)) {
+      deepFreeze(v);
+    }
+  }
+  return obj;
 }
 
 describe('node.create — appends on top', () => {
@@ -144,13 +172,18 @@ describe('node.create — rejects each invalid field', () => {
     const doc = docWith();
     doc.groups = { g1: { id: 'g1', name: 'g' } };
     const n = { ...node('n1'), groupId: 'g1' };
-    expect(() => compileCommand(doc, { type: 'node.create', node: n })).not.toThrow();
+    expect(() =>
+      compileCommand(doc, { type: 'node.create', node: n }),
+    ).not.toThrow();
   });
 });
 
 describe('node.move — applies delta to every id', () => {
   it('moves each node by (dx, dy)', () => {
-    const doc = docWith(node('n1', { x: 10, y: 20 }), node('n2', { x: 30, y: 40 }));
+    const doc = docWith(
+      node('n1', { x: 10, y: 20 }),
+      node('n2', { x: 30, y: 40 }),
+    );
     const patch = compileCommand(doc, {
       type: 'node.move',
       ids: ['n1', 'n2'],
@@ -269,8 +302,16 @@ describe('node.delete — removes nodes, order entries and incident edges', () =
   it('deletes incident edges in the same patch (I-09)', () => {
     const doc = docWith(node('n1'), node('n2'), node('n3'));
     doc.edges = {
-      e1: { id: 'e1', from: { node: 'n1', anchor: 'auto' }, to: { node: 'n2', anchor: 'auto' } },
-      e2: { id: 'e2', from: { node: 'n2', anchor: 'auto' }, to: { node: 'n3', anchor: 'auto' } },
+      e1: {
+        id: 'e1',
+        from: { node: 'n1', anchor: 'auto' },
+        to: { node: 'n2', anchor: 'auto' },
+      },
+      e2: {
+        id: 'e2',
+        from: { node: 'n2', anchor: 'auto' },
+        to: { node: 'n3', anchor: 'auto' },
+      },
     };
     const patch = compileCommand(doc, { type: 'node.delete', ids: ['n1'] });
     expect(patch.edges.e1).toBeDefined();
@@ -282,7 +323,11 @@ describe('node.delete — removes nodes, order entries and incident edges', () =
   it('a shared edge (both ends deleted) is listed once', () => {
     const doc = docWith(node('n1'), node('n2'));
     doc.edges = {
-      e1: { id: 'e1', from: { node: 'n1', anchor: 'auto' }, to: { node: 'n2', anchor: 'auto' } },
+      e1: {
+        id: 'e1',
+        from: { node: 'n1', anchor: 'auto' },
+        to: { node: 'n2', anchor: 'auto' },
+      },
     };
     const patch = compileCommand(doc, {
       type: 'node.delete',
@@ -322,7 +367,10 @@ describe('node.delete — duplicates ignored', () => {
 describe('node.delete — rejects unknown ids', () => {
   it('unknown id throws', () => {
     expect(() =>
-      compileCommand(docWith(node('n1')), { type: 'node.delete', ids: ['nope'] }),
+      compileCommand(docWith(node('n1')), {
+        type: 'node.delete',
+        ids: ['nope'],
+      }),
     ).toThrow(CommandError);
   });
 });
@@ -335,6 +383,274 @@ describe('node.delete — empty patch for empty ids', () => {
     });
     expect(patch.nodes).toEqual({});
     expect(patch.order).toBeUndefined();
+  });
+});
+
+// --- T-009 R2: edge.create ---
+
+describe('edge.create — adds the edge, touches nothing else', () => {
+  it('patch contains only the new edge', () => {
+    const doc = deepFreeze(docWith(node('n1'), node('n2')));
+    const e = deepFreeze(edge('e1', 'n1', 'n2'));
+    const patch = compileCommand(doc, { type: 'edge.create', edge: e });
+    expect(patch.edges.e1).toEqual({ after: e });
+    expect(patch.nodes).toEqual({});
+    expect(patch.groups).toEqual({});
+    expect(patch.order).toBeUndefined();
+  });
+
+  it('nodes, groups and order keep their references after applyPatch', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    const patch = compileCommand(doc, {
+      type: 'edge.create',
+      edge: edge('e1', 'n1', 'n2'),
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes).toBe(doc.nodes);
+    expect(next.groups).toBe(doc.groups);
+    expect(next.order).toBe(doc.order);
+    expect(next.edges).not.toBe(doc.edges);
+    expect(next.edges.e1).toEqual(edge('e1', 'n1', 'n2'));
+  });
+
+  it('the resulting doc passes validateDoc', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    const patch = compileCommand(doc, {
+      type: 'edge.create',
+      edge: edge('e1', 'n1', 'n2', { label: 'link' }),
+    });
+    expect(validateDoc(applyPatch(doc, patch))).toEqual([]);
+  });
+
+  it('every fixed anchor is accepted', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    for (const anchor of ['top', 'right', 'bottom', 'left'] as const) {
+      const patch = compileCommand(doc, {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          from: { node: 'n1', anchor },
+          to: { node: 'n2', anchor },
+        }),
+      });
+      expect(validateDoc(applyPatch(doc, patch))).toEqual([]);
+    }
+  });
+
+  it('undo (invertPatch) restores the previous doc exactly', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    doc.edges.e0 = edge('e0', 'n2', 'n1');
+    const patch = compileCommand(doc, {
+      type: 'edge.create',
+      edge: edge('e1', 'n1', 'n2', { label: 'x' }),
+    });
+    const next = applyPatch(doc, patch);
+    const restored = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(restored, doc)).toBe(true);
+  });
+});
+
+describe('edge.create — rejects each invalid case', () => {
+  it('empty id', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('', 'n1', 'n2'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('id already exists (even with a different pair)', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    doc.edges.e1 = edge('e1', 'n1', 'n2');
+    expect(() =>
+      compileCommand(doc, {
+        type: 'edge.create',
+        edge: edge('e1', 'n2', 'n1'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('from.node does not exist', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'ghost', 'n2'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('to.node does not exist', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'ghost'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('from.node === to.node (self-edge)', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n1'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('an existing edge has the same (from, to) pair', () => {
+    const doc = docWith(node('n1'), node('n2'), node('n3'));
+    doc.edges.e1 = edge('e1', 'n1', 'n2');
+    expect(() =>
+      compileCommand(doc, {
+        type: 'edge.create',
+        edge: edge('e2', 'n1', 'n2'),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('the reverse-direction pair is valid', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    doc.edges.e1 = edge('e1', 'n1', 'n2');
+    expect(() =>
+      compileCommand(doc, {
+        type: 'edge.create',
+        edge: edge('e2', 'n2', 'n1'),
+      }),
+    ).not.toThrow();
+  });
+
+  it('from.anchor is not one of the five', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          from: { node: 'n1', anchor: 'diagonal' as Edge['from']['anchor'] },
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('to.anchor is not one of the five', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          to: { node: 'n2', anchor: 'center' as Edge['to']['anchor'] },
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('from.anchor missing at runtime is rejected (commands are data)', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          from: { node: 'n1' } as EdgeEndpoint,
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('label is present and not a string', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', { label: 42 as unknown as string }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('a missing from endpoint object throws CommandError, not TypeError', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          from: undefined as unknown as EdgeEndpoint,
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+});
+
+// --- T-009 R2: edge.delete ---
+
+describe('edge.delete — removes the listed edges', () => {
+  function docWithEdges(): Doc {
+    const doc = docWith(node('n1'), node('n2'), node('n3'));
+    doc.edges = {
+      e1: edge('e1', 'n1', 'n2'),
+      e2: edge('e2', 'n2', 'n3'),
+      e3: edge('e3', 'n3', 'n1'),
+    };
+    return doc;
+  }
+
+  it('each edge is removed with its before', () => {
+    const doc = deepFreeze(docWithEdges());
+    const patch = compileCommand(doc, {
+      type: 'edge.delete',
+      ids: ['e1', 'e3'],
+    });
+    expect(patch.edges.e1).toEqual({ before: doc.edges.e1 });
+    expect(patch.edges.e3).toEqual({ before: doc.edges.e3 });
+    expect(patch.edges.e2).toBeUndefined();
+    expect(patch.nodes).toEqual({});
+    expect(patch.groups).toEqual({});
+    expect(patch.order).toBeUndefined();
+    const next = applyPatch(doc, patch);
+    expect(Object.keys(next.edges)).toEqual(['e2']);
+  });
+
+  it('nodes and order keep their references after applyPatch', () => {
+    const doc = docWithEdges();
+    const patch = compileCommand(doc, { type: 'edge.delete', ids: ['e1'] });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes).toBe(doc.nodes);
+    expect(next.groups).toBe(doc.groups);
+    expect(next.order).toBe(doc.order);
+  });
+
+  it('the resulting doc passes validateDoc', () => {
+    const doc = docWithEdges();
+    const patch = compileCommand(doc, {
+      type: 'edge.delete',
+      ids: ['e1', 'e2'],
+    });
+    expect(validateDoc(applyPatch(doc, patch))).toEqual([]);
+  });
+
+  it('undo (invertPatch) restores the previous doc exactly', () => {
+    const doc = docWithEdges();
+    const patch = compileCommand(doc, {
+      type: 'edge.delete',
+      ids: ['e1', 'e3'],
+    });
+    const next = applyPatch(doc, patch);
+    const restored = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(restored, doc)).toBe(true);
+  });
+
+  it('empty ids returns an empty patch', () => {
+    const patch = compileCommand(docWithEdges(), {
+      type: 'edge.delete',
+      ids: [],
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('duplicates are ignored (first occurrence wins)', () => {
+    const patch = compileCommand(docWithEdges(), {
+      type: 'edge.delete',
+      ids: ['e1', 'e1'],
+    });
+    expect(Object.keys(patch.edges)).toEqual(['e1']);
+  });
+
+  it('unknown id throws', () => {
+    expect(() =>
+      compileCommand(docWithEdges(), { type: 'edge.delete', ids: ['ghost'] }),
+    ).toThrow(CommandError);
   });
 });
 
