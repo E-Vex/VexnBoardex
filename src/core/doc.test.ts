@@ -135,6 +135,53 @@ describe('validateDoc — edge-self', () => {
   });
 });
 
+describe('validateDoc — edge-duplicate (D-30)', () => {
+  it('two edges with the same (from, to) pair are reported', () => {
+    const doc = validDoc();
+    doc.edges.e2 = edge('e2', 'n1', 'n2');
+    const errs = validateDoc(doc);
+    expect(errs).toEqual([
+      'edge-duplicate: edge "e2" repeats the (from, to) pair of edge "e1"',
+    ]);
+  });
+
+  it('the reverse-direction pair is valid', () => {
+    const doc = validDoc();
+    doc.edges.e2 = edge('e2', 'n2', 'n1');
+    expect(validateDoc(doc)).toEqual([]);
+  });
+
+  it('edge-self is still reported alongside the new check', () => {
+    const doc = validDoc();
+    doc.edges.e1!.to.node = 'n1';
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('edge-self:'))).toBe(true);
+    expect(errs.some((e) => e.startsWith('edge-duplicate:'))).toBe(false);
+  });
+
+  it('a third edge with the same pair repeats the first claimant', () => {
+    const doc = validDoc();
+    doc.edges.e2 = edge('e2', 'n1', 'n2');
+    doc.edges.e3 = edge('e3', 'n1', 'n2');
+    const errs = validateDoc(doc);
+    expect(errs.filter((e) => e.startsWith('edge-duplicate:'))).toEqual([
+      'edge-duplicate: edge "e2" repeats the (from, to) pair of edge "e1"',
+      'edge-duplicate: edge "e3" repeats the (from, to) pair of edge "e1"',
+    ]);
+  });
+
+  it('two self-edges on the same node report both edge-self and edge-duplicate', () => {
+    const doc = validDoc();
+    doc.edges.e1!.to.node = 'n1'; // e1: n1 -> n1
+    doc.edges.e2 = edge('e2', 'n1', 'n1'); // e2: n1 -> n1
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('edge-self:'))).toBe(true);
+    expect(errs).toContain(
+      'edge-duplicate: edge "e2" repeats the (from, to) pair of edge "e1"',
+    );
+  });
+});
+
 describe('validateDoc — group-dangling', () => {
   it('node.groupId references a missing group', () => {
     const doc = validDoc();

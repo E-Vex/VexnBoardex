@@ -89,4 +89,6 @@ export interface Patch {
 export type Command =
   | { type: 'node.create'; node: Node }
   | { type: 'node.move'; ids: Id[]; dx: number; dy: number }
-  | { type: 'node.delete'; ids: Id[] };
+  | { type: 'node.delete'; ids: Id[] }
+  | { type: 'edge.create'; edge: Edge }
+  | { type: 'edge.delete'; ids: Id[] };

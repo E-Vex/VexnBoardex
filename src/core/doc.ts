@@ -5,7 +5,7 @@
  * without affecting other documents.
  */
 
-import type { Doc } from './types';
+import type { Doc, Id } from './types';
 
 /** A fresh `{ nodes: {}, edges: {}, groups: {}, order: [] }` each call. */
 export function emptyDoc(): Doc {
@@ -26,6 +26,8 @@ export function emptyDoc(): Doc {
  * - `key-mismatch:` — a map key differs from its entity's `id`.
  * - `edge-dangling:` — an edge references a node that does not exist.
  * - `edge-self:` — an edge's `from.node` equals its `to.node`.
+ * - `edge-duplicate:` — two edges share the same (from, to) pair (D-30);
+ *   the reverse direction is allowed.
  * - `group-dangling:` — a node's `groupId` references a missing group.
  * - `bad-number:` — a non-finite `x`, `y`, `w`, `h`, or `w ≤ 0`, `h ≤ 0`.
  */
@@ -85,7 +87,10 @@ export function validateDoc(doc: Doc): string[] {
     }
   }
 
-  // edge-dangling and edge-self.
+  // edge-dangling, edge-self and edge-duplicate.
+  // pairOwner maps a (from, to) pair to the first edge id that claimed it
+  // (D-30: no two edges share the same pair; the reverse direction is valid).
+  const pairOwner = new Map<string, Id>();
   for (const [id, edge] of Object.entries(doc.edges)) {
     if (!Object.prototype.hasOwnProperty.call(doc.nodes, edge.from.node)) {
       errors.push(
@@ -99,6 +104,15 @@ export function validateDoc(doc: Doc): string[] {
     }
     if (edge.from.node === edge.to.node) {
       errors.push(`edge-self: edge "${id}" connects a node to itself`);
+    }
+    const pairKey = JSON.stringify([edge.from.node, edge.to.node]);
+    const owner = pairOwner.get(pairKey);
+    if (owner !== undefined) {
+      errors.push(
+        `edge-duplicate: edge "${id}" repeats the (from, to) pair of edge "${owner}"`,
+      );
+    } else {
+      pairOwner.set(pairKey, id);
     }
   }
 
