@@ -74,3 +74,17 @@ export const SELECTION_OUTLINE_WIDTH = 2;
  * T-007's pixel probes stay valid.
  */
 export const SELECTION_OUTLINE_OFFSET = 3;
+
+// ── Edges (T-010) ───────────────────────────────────────────────────────────
+
+/** Edge stroke colour — subtle but visible on the dark board. */
+export const EDGE_COLOR = '#8a8a9a';
+
+/** Edge stroke width in world units (1 unit = 1 CSS px at zoom 1). */
+export const EDGE_WIDTH = 2;
+
+/** Arrowhead size in world units (length and half-width). */
+export const ARROWHEAD_SIZE = 10;
+
+/** Arrowhead angle (half-angle, in radians). */
+export const ARROWHEAD_ANGLE = Math.PI / 6; // 30°

@@ -19,8 +19,9 @@
  * nodes in this file — `visibleWorldRect` is used only for culling).
  */
 
-import type { Doc, Node } from '../core/types';
+import type { Doc, Node, Edge } from '../core/types';
 import { rectContains, rectsIntersect } from '../core/geometry';
+import { edgeEndpoints, nodeRect } from '../core/edgeGeometry';
 import {
   type Camera,
   cameraToMatrix,
@@ -46,6 +47,10 @@ import {
   SELECTION_COLOR,
   SELECTION_OUTLINE_OFFSET,
   SELECTION_OUTLINE_WIDTH,
+  EDGE_COLOR,
+  EDGE_WIDTH,
+  ARROWHEAD_SIZE,
+  ARROWHEAD_ANGLE,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -169,6 +174,90 @@ function drawSelectionOutline(
   ctx.stroke();
 }
 
+// ── Edge drawing (T-010) ──────────────────────────────────────────────────
+
+/**
+ * Draw an arrowhead at `tip` pointing along the direction `angle` (radians),
+ * with the given `size` (world units). The arrowhead is an isosceles
+ * triangle whose tip is exactly at `tip`.
+ */
+function drawArrowhead(
+  ctx: CanvasRenderingContext2D,
+  tipX: number,
+  tipY: number,
+  angle: number,
+  size: number,
+): void {
+  const halfAngle = ARROWHEAD_ANGLE;
+  const left = angle + Math.PI - halfAngle;
+  const right = angle + Math.PI + halfAngle;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX + Math.cos(left) * size, tipY + Math.sin(left) * size);
+  ctx.lineTo(tipX + Math.cos(right) * size, tipY + Math.sin(right) * size);
+  ctx.closePath();
+  ctx.fillStyle = EDGE_COLOR;
+  ctx.fill();
+}
+
+/**
+ * Draw one edge in world coordinates (T-010): a straight line from the
+ * resolved `from` endpoint to the resolved `to` endpoint, with an arrowhead
+ * at the `to` end. The line width and arrowhead are scaled by `1/scale`
+ * so they render at constant screen size regardless of zoom.
+ *
+ * `drag` (UI preview) can offset nodes — edges connected to dragged nodes
+ * are drawn to their preview positions so the arrow follows the drag.
+ */
+function drawEdge(
+  ctx: CanvasRenderingContext2D,
+  edge: Edge,
+  doc: Doc,
+  scale: number,
+  drag: { ids: Set<string>; dx: number; dy: number } | null,
+): void {
+  // Resolve the rect for each node, applying drag preview offset if needed.
+  const rectOf = (id: string) => {
+    const node = doc.nodes[id];
+    if (!node) return undefined;
+    const isDragged = drag !== null && drag.ids.has(id);
+    const dx = isDragged ? drag.dx : 0;
+    const dy = isDragged ? drag.dy : 0;
+    const r = nodeRect(node);
+    return { x: r.x + dx, y: r.y + dy, w: r.w, h: r.h };
+  };
+
+  const endpoints = edgeEndpoints(edge, rectOf);
+  if (!endpoints) return; // one of the nodes is missing
+
+  const { from, to } = endpoints;
+
+  // Line from `from` to `to`.
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.lineWidth = EDGE_WIDTH / scale;
+  ctx.strokeStyle = EDGE_COLOR;
+  ctx.stroke();
+
+  // Arrowhead at the `to` endpoint, pointing along the line direction.
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx);
+  drawArrowhead(ctx, to.x, to.y, angle, ARROWHEAD_SIZE / scale);
+
+  // Optional: edge label (T-010 - basic label at midpoint).
+  if (edge.label && edge.label.length > 0) {
+    const midX = (from.x + to.x) / 2;
+    const midY = (from.y + to.y) / 2;
+    ctx.font = `${FONT_SIZE}px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = EDGE_COLOR;
+    ctx.fillText(edge.label, midX, midY);
+  }
+}
+
 // ── Renderer ─────────────────────────────────────────────────────────────
 
 /**
@@ -234,10 +323,57 @@ export function renderBoard(
     ctx.stroke();
   }
 
+  // 3b. Edges — between the grid and the nodes (T-010). Drawn in world
+  // coordinates through the camera transform, beneath all nodes (D-21).
+  // Culling: skip edges whose both endpoints are outside the visible rect.
+  const m = cameraToMatrix(camera);
+  const dragPreview = ui.drag
+    ? { ids: new Set(ui.drag.ids), dx: ui.drag.dx, dy: ui.drag.dy }
+    : null;
+  ctx.save();
+  ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
+  for (const edge of Object.values(doc.edges)) {
+    // Quick culling: if both endpoints are outside visible, skip.
+    // We use a loose check by computing the edge's bbox from its endpoints.
+    const rectOfForCull = (id: string) => {
+      const node = doc.nodes[id];
+      if (!node) return undefined;
+      const isDragged = dragPreview !== null && dragPreview.ids.has(id);
+      const dx = isDragged ? dragPreview.dx : 0;
+      const dy = isDragged ? dragPreview.dy : 0;
+      const r = nodeRect(node);
+      return { x: r.x + dx, y: r.y + dy, w: r.w, h: r.h };
+    };
+    const endpoints = edgeEndpoints(edge, rectOfForCull);
+    if (!endpoints) continue;
+    // Rough bbox culling: if both endpoints are outside visible, skip.
+    const fromIn = rectContains(visible, endpoints.from);
+    const toIn = rectContains(visible, endpoints.to);
+    if (!fromIn && !toIn) {
+      // Further check: if the line segment might cross the visible rect,
+      // we should draw it. For simplicity, we draw if either endpoint is in
+      // or if the line intersects the visible rect's expanded bounds.
+      // A simple segment-rect intersection test:
+      const segMinX = Math.min(endpoints.from.x, endpoints.to.x);
+      const segMaxX = Math.max(endpoints.from.x, endpoints.to.x);
+      const segMinY = Math.min(endpoints.from.y, endpoints.to.y);
+      const segMaxY = Math.max(endpoints.from.y, endpoints.to.y);
+      if (
+        segMaxX < visible.x ||
+        segMinX > visible.x + visible.w ||
+        segMaxY < visible.y ||
+        segMinY > visible.y + visible.h
+      ) {
+        continue; // segment bbox doesn't intersect visible rect
+      }
+    }
+    drawEdge(ctx, edge, doc, m.scale, dragPreview);
+  }
+  ctx.restore();
+
   // 4. Nodes, in doc.order (bottom → top), in world coordinates through the
   // camera transform (I-02: the transform comes from cameraToMatrix only).
-  // Edges will later be drawn here, between the grid and the nodes.
-  const m = cameraToMatrix(camera);
+  // Edges are drawn between the grid and the nodes (D-21).
   const selected = new Set(ui.selection);
   const drag = ui.drag;
   const draggedIds = drag !== null ? new Set(drag.ids) : null;
