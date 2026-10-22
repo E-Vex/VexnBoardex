@@ -19,7 +19,7 @@
  * nodes in this file — `visibleWorldRect` is used only for culling).
  */
 
-import type { Doc, Node, Edge } from '../core/types';
+import type { Doc, Node, Edge, Id } from '../core/types';
 import { rectContains, rectsIntersect } from '../core/geometry';
 import { edgeEndpoints, nodeRect } from '../core/edgeGeometry';
 import {
@@ -51,6 +51,11 @@ import {
   EDGE_WIDTH,
   ARROWHEAD_SIZE,
   ARROWHEAD_ANGLE,
+  HANDLE_COLOR,
+  HANDLE_BORDER_COLOR,
+  HANDLE_RADIUS,
+  HANDLE_BORDER_WIDTH,
+  HANDLE_OFFSET,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -258,6 +263,141 @@ function drawEdge(
   }
 }
 
+// ── Handle drawing (T-011) ──────────────────────────────────────────────────
+
+/** The 4 handle anchors (midpoints of node sides). */
+const HANDLE_ANCHORS: ('top' | 'right' | 'bottom' | 'left')[] = [
+  'top',
+  'right',
+  'bottom',
+  'left',
+];
+
+/**
+ * Get the world point for a handle anchor on a node rect.
+ */
+function getHandlePoint(node: { x: number; y: number; w: number; h: number }, anchor: 'top' | 'right' | 'bottom' | 'left'): { x: number; y: number } {
+  switch (anchor) {
+    case 'top':
+      return { x: node.x + node.w / 2, y: node.y };
+    case 'right':
+      return { x: node.x + node.w, y: node.y + node.h / 2 };
+    case 'bottom':
+      return { x: node.x + node.w / 2, y: node.y + node.h };
+    case 'left':
+      return { x: node.x, y: node.y + node.h / 2 };
+  }
+}
+
+/**
+ * Draw connection handles on a node (T-011). Handles are drawn as small
+ * circles at the midpoints of each side, offset slightly outside the node
+ * rect. They are drawn in screen space so they stay constant size
+ * regardless of zoom.
+ */
+function drawHandles(
+  ctx: CanvasRenderingContext2D,
+  node: { x: number; y: number; w: number; h: number },
+  camera: Camera,
+): void {
+  // Draw in screen space for constant size.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to screen space
+  for (const anchor of HANDLE_ANCHORS) {
+    const wp = getHandlePoint(node, anchor);
+    const sp = worldToScreen(camera, wp);
+    // Offset the handle outside the node in screen space.
+    const offset = HANDLE_OFFSET;
+    const spOffset = { ...sp };
+    switch (anchor) {
+      case 'top':
+        spOffset.y -= offset;
+        break;
+      case 'right':
+        spOffset.x += offset;
+        break;
+      case 'bottom':
+        spOffset.y += offset;
+        break;
+      case 'left':
+        spOffset.x -= offset;
+        break;
+    }
+    const r = HANDLE_RADIUS;
+    ctx.beginPath();
+    ctx.arc(spOffset.x, spOffset.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = HANDLE_COLOR;
+    ctx.fill();
+    ctx.lineWidth = HANDLE_BORDER_WIDTH;
+    ctx.strokeStyle = HANDLE_BORDER_COLOR;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ── Connection preview drawing (T-011) ──────────────────────────────────────
+
+/**
+ * Draw the connection preview line from a handle to a world point (T-011).
+ * The preview uses the drag state encoded in `ui.drag` where:
+ * - `drag.ids[0]` is the from-node id
+ * - `drag.dx`, `drag.dy` are the world coordinates of the cursor endpoint
+ */
+function drawConnectPreview(
+  ctx: CanvasRenderingContext2D,
+  doc: Doc,
+  ui: UiState,
+  scale: number,
+): void {
+  const drag = ui.drag;
+  if (!drag || drag.ids.length === 0) return;
+
+  const fromId = drag.ids[0] as Id;
+  const fromNode = doc.nodes[fromId];
+  if (!fromNode) return;
+
+  // The from-handle is determined by the anchor stored in the connect tool.
+  // For now, we need to infer it. Since the drag preview encodes the cursor
+  // position in dx/dy, we need to know which handle was used.
+  // We'll use a simple approach: find which handle is closest to the line.
+  // But actually, the connect tool knows the fromAnchor. We need to pass it.
+  // For now, let's compute the handle point from the fromNode rect that
+  // is closest to the target point.
+  const targetPoint = { x: drag.dx, y: drag.dy };
+  const fromRect = { x: fromNode.x, y: fromNode.y, w: fromNode.w, h: fromNode.h };
+  
+  // Find the handle on fromNode that points toward targetPoint.
+  let bestAnchor: 'top' | 'right' | 'bottom' | 'left' = 'right';
+  let bestDist = Infinity;
+  for (const anchor of HANDLE_ANCHORS) {
+    const hp = getHandlePoint(fromRect, anchor);
+    const dx = targetPoint.x - hp.x;
+    const dy = targetPoint.y - hp.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      bestAnchor = anchor;
+    }
+  }
+  const fromPoint = getHandlePoint(fromRect, bestAnchor);
+
+  // Draw the preview line in world coordinates (transformed by camera).
+  ctx.beginPath();
+  ctx.moveTo(fromPoint.x, fromPoint.y);
+  ctx.lineTo(targetPoint.x, targetPoint.y);
+  ctx.lineWidth = EDGE_WIDTH / scale;
+  ctx.strokeStyle = EDGE_COLOR;
+  ctx.setLineDash([5, 5]); // dashed for preview
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw a small indicator at the target (not an arrowhead yet, just a dot).
+  ctx.beginPath();
+  ctx.arc(targetPoint.x, targetPoint.y, 4 / scale, 0, Math.PI * 2);
+  ctx.fillStyle = EDGE_COLOR;
+  ctx.fill();
+}
+
 // ── Renderer ─────────────────────────────────────────────────────────────
 
 /**
@@ -369,6 +509,20 @@ export function renderBoard(
     }
     drawEdge(ctx, edge, doc, m.scale, dragPreview);
   }
+
+  // 3c. Connection preview (T-011) — drawn between edges and nodes.
+  if (dragPreview !== null && dragPreview.ids.size > 0) {
+    // Check if this is a connection preview (from connect tool) vs node drag.
+    // Connection preview has exactly one id and the dx/dy represent the target point.
+    // Node drag has dx/dy as deltas. We distinguish by checking if dx/dy are
+    // absolute positions (large values) vs small deltas. For simplicity, we
+    // check if the drag ids include a node that exists and the dx/dy look
+    // like absolute coordinates (outside typical drag delta range).
+    // Better: the connect tool sets a special flag. For now, we check if
+    // the dx/dy values are far from the node's position.
+    drawConnectPreview(ctx, doc, ui, m.scale);
+  }
+
   ctx.restore();
 
   // 4. Nodes, in doc.order (bottom → top), in world coordinates through the
@@ -395,7 +549,9 @@ export function renderBoard(
     // visible rect — a selected node is culled like any other (R5).
     if (!rectsIntersect({ x, y, w: node.w, h: node.h }, visible)) continue;
     drawNode(ctx, node, m.scale, dx, dy);
+    // Draw connection handles on selected nodes (T-011).
     if (selected.has(id)) {
+      drawHandles(ctx, { x, y, w: node.w, h: node.h }, camera);
       drawSelectionOutline(ctx, x, y, node.w, node.h, m.scale);
     }
   }

@@ -1,9 +1,10 @@
-// VexBoard entry point (T-005 / T-007 R10 / T-008 R7): wires the camera
+// VexBoard entry point (T-005 / T-007 R10 / T-008 R7 / T-011 R4): wires the camera
 // store, the doc store, the UI store (selection + drag preview, D-25), the
 // board renderer, the cursor tracker, the HUD, camera input (pan/zoom),
-// node input (double-click creates a card, selects it) and select input
-// (select, move, delete). Camera, document and UI changes flow through
-// their stores, each triggering a re-render and a HUD update.
+// node input (double-click creates a card, selects it), select input
+// (select, move, delete) and connect input (drag from handle to create edge).
+// Camera, document and UI changes flow through their stores, each triggering
+// a re-render and a HUD update.
 import './style.css';
 import { emptyDoc } from './core/doc';
 import { createDocStore } from './core/store';
@@ -11,6 +12,7 @@ import { attachCameraInput } from './input/cameraInput';
 import { createCursorTracker } from './input/cursor';
 import { attachNodeInput } from './input/nodeInput';
 import { attachSelectInput } from './input/selectInput';
+import { attachConnectInput } from './input/connectInput';
 import { createHud } from './ui/hud';
 import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
@@ -128,6 +130,16 @@ const selectInput = attachSelectInput({
   isPanActive: () => input.isPanning() || input.isSpaceHeld(),
 });
 
+// Connect input: drag from a handle to create an edge (T-011 R4).
+// Stands down when panning is active (D-26).
+const connectInput = attachConnectInput({
+  canvas: host.canvas,
+  cameraStore: store,
+  docStore,
+  uiStore,
+  isPanActive: () => input.isPanning() || input.isSpaceHeld(),
+});
+
 // Initial paint — renders on demand, never in a continuous loop (D-10).
 host.requestRender();
 
@@ -136,3 +148,4 @@ host.requestRender();
 void input;
 void nodeInput;
 void selectInput;
+void connectInput;

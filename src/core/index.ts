@@ -13,4 +13,10 @@ export {
 export { compileCommand, CommandError } from './commands';
 export { createDocStore } from './store';
 export type { DocStore } from './store';
-export { hitTest } from './hitTest';
+export {
+  hitTest,
+  hitTestWithHandles,
+  HANDLE_ANCHORS,
+  HANDLE_HIT_RADIUS,
+  type HitResult,
+} from './hitTest';
