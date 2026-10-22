@@ -20,3 +20,11 @@ export {
   HANDLE_HIT_RADIUS,
   type HitResult,
 } from './hitTest';
+export {
+  serializeDoc,
+  deserializeDoc,
+  coerceDoc,
+  FILE_VERSION,
+  type FileEnvelope,
+  type LoadResult,
+} from './serialize';
