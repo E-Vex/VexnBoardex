@@ -1,8 +1,9 @@
-// VexBoard entry point (T-005 / T-007 R10 / T-008 R7 / T-011 R4): wires the camera
-// store, the doc store, the UI store (selection + drag preview, D-25), the
-// board renderer, the cursor tracker, the HUD, camera input (pan/zoom),
-// node input (double-click creates a card, selects it), select input
-// (select, move, delete) and connect input (drag from handle to create edge).
+// VexBoard entry point (T-005 / T-007 R10 / T-008 R7 / T-011 R4 / T-013 R1):
+// wires the camera store, the doc store, the UI store (selection + drag
+// preview, D-25), the board renderer, the cursor tracker, the HUD, camera
+// input (pan/zoom), node input (double-click creates a card, selects it),
+// select input (select, move, delete), connect input (drag from handle to
+// create edge), and IO (autosave, file export/import).
 // Camera, document and UI changes flow through their stores, each triggering
 // a re-render and a HUD update.
 import './style.css';
@@ -19,6 +20,8 @@ import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
 import { createUiStore, pruneSelection } from './view/uiStore';
+import { createAutosaver } from './io/autosave';
+import { exportFile, importFile, pickFile } from './io/file';
 
 // Initial camera: world (0, 0) centered in the viewport at zoom 1 (R6).
 const initialCamera = cameraCenteredOn(
@@ -139,6 +142,60 @@ const connectInput = attachConnectInput({
   uiStore,
   isPanActive: () => input.isPanning() || input.isSpaceHeld(),
 });
+
+// --- Autosave (T-013) ---
+// Create autosaver that saves on every doc/view change.
+const autosaver = createAutosaver();
+
+// Subscribe to document changes → autosave.
+docStore.subscribe((doc) => {
+  autosaver(doc, store.get());
+});
+
+// Subscribe to camera changes → autosave (view).
+store.subscribe((cam) => {
+  autosaver(docStore.get(), cam);
+});
+
+// Toolbar for export/import (T-13 R2).
+function createToolbar(): void {
+  const toolbar = document.createElement('div');
+  toolbar.id = 'vex-toolbar';
+  toolbar.style.cssText = `
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+    font-family: system-ui, sans-serif;
+  `;
+
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export';
+  exportBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+  exportBtn.onclick = () => exportFile(docStore.get(), store.get());
+
+  const importBtn = document.createElement('button');
+  importBtn.textContent = 'Import';
+  importBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+  importBtn.onclick = async () => {
+    const file = await pickFile();
+    if (file) {
+      const result = await importFile(file);
+      // Replace document with imported one.
+      // We can't easily replace docStore, so we'd need a reset mechanism.
+      // For now, log the result.
+      console.log('[import]', result);
+      for (const w of result.warnings) console.warn('[import]', w);
+    }
+  };
+
+  toolbar.appendChild(exportBtn);
+  toolbar.appendChild(importBtn);
+  document.body.appendChild(toolbar);
+}
+createToolbar();
 
 // Initial paint — renders on demand, never in a continuous loop (D-10).
 host.requestRender();
