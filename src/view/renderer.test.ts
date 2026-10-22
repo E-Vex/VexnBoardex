@@ -312,6 +312,8 @@ describe('renderBoard — empty document (T-007 R12)', () => {
 });
 
 // T-008 R9 — selection outline and drag preview.
+import { HANDLE_BORDER_COLOR } from './theme';
+
 describe('renderBoard — selection outline (T-008 R9)', () => {
   const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
 
@@ -323,15 +325,19 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
     });
 
-    // Origin marker (1) + node border (1) + outline (1) = 3 strokes total.
-    expect(countCalls(ctx, 'stroke')).toBe(3);
-    // Stroke styles in order: origin, node border, then the accent outline.
+    // Origin marker (1) + node border (1) + 4 handles (4) + outline (1) = 7 strokes total.
+    expect(countCalls(ctx, 'stroke')).toBe(7);
+    // Stroke styles in order: origin, node border, 4× handle border, then the accent outline.
     const styles = ctx.calls
       .filter((c) => c.name === 'strokeStyle')
       .map((c) => c.args[0]);
     expect(styles).toEqual([
       ORIGIN_MARKER_COLOR,
       NODE_BORDER_COLOR,
+      HANDLE_BORDER_COLOR,
+      HANDLE_BORDER_COLOR,
+      HANDLE_BORDER_COLOR,
+      HANDLE_BORDER_COLOR,
       SELECTION_COLOR,
     ]);
     // The outline stroke happens after the node's fill call (the last fill:
@@ -350,7 +356,8 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
     });
 
-    // Origin marker + the node's own border stroke, nothing more.
+    // Origin marker + the node's own border stroke = 2 strokes.
+    // Handles are only drawn on selected nodes.
     expect(countCalls(ctx, 'stroke')).toBe(2);
     const styles = ctx.calls
       .filter((c) => c.name === 'strokeStyle')

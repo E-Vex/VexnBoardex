@@ -88,3 +88,20 @@ export const ARROWHEAD_SIZE = 10;
 
 /** Arrowhead angle (half-angle, in radians). */
 export const ARROWHEAD_ANGLE = Math.PI / 6; // 30°
+
+// ── Connection handles (T-011) ────────────────────────────────────────────────
+
+/** Handle fill colour — matches the accent for visibility. */
+export const HANDLE_COLOR = '#f5a623';
+
+/** Handle border colour. */
+export const HANDLE_BORDER_COLOR = '#1e1e24';
+
+/** Handle radius in CSS px on screen (constant size at any zoom). */
+export const HANDLE_RADIUS = 6;
+
+/** Handle border width in CSS px on screen. */
+export const HANDLE_BORDER_WIDTH = 2;
+
+/** Handle offset from node edge in CSS px on screen (drawn outside the node). */
+export const HANDLE_OFFSET = 8;
