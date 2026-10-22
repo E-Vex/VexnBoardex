@@ -1,0 +1,68 @@
+{
+  "app": "vexboard",
+  "version": 1,
+  "doc": {
+    "nodes": {
+      "node-1": {
+        "id": "node-1",
+        "kind": "card",
+        "x": 100,
+        "y": 100,
+        "w": 200,
+        "h": 120,
+        "text": "First card",
+        "color": "#d7e5f7",
+        "tags": ["important"],
+        "groupId": "group-1"
+      },
+      "node-2": {
+        "id": "node-2",
+        "kind": "sticky",
+        "x": 400,
+        "y": 100,
+        "w": 160,
+        "h": 120,
+        "text": "Sticky note",
+        "color": "#fef3a2",
+        "tags": [],
+        "groupId": "group-1"
+      },
+      "node-3": {
+        "id": "node-3",
+        "kind": "text",
+        "x": 250,
+        "y": 300,
+        "w": 160,
+        "h": 40,
+        "text": "Standalone text",
+        "color": "#f4f1ea",
+        "tags": ["note"]
+      }
+    },
+    "edges": {
+      "edge-1": {
+        "id": "edge-1",
+        "from": { "node": "node-1", "anchor": "right" },
+        "to": { "node": "node-2", "anchor": "left" },
+        "label": "connects to"
+      },
+      "edge-2": {
+        "id": "edge-2",
+        "from": { "node": "node-2", "anchor": "bottom" },
+        "to": { "node": "node-3", "anchor": "top" }
+      }
+    },
+    "groups": {
+      "group-1": {
+        "id": "group-1",
+        "name": "Project Alpha"
+      }
+    },
+    "order": ["node-1", "node-2", "node-3"]
+  },
+  "view": {
+    "x": -50,
+    "y": -25,
+    "zoom": 1.25
+  }
+}
