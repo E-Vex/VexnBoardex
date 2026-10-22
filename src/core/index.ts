@@ -11,8 +11,7 @@ export {
   PatchConflictError,
 } from './patch';
 export { compileCommand, CommandError } from './commands';
-export { createDocStore } from './store';
-export type { DocStore } from './store';
+export { createDocStore, type DocStore, type DocStoreOptions } from './store';
 export {
   hitTest,
   hitTestWithHandles,
@@ -28,3 +27,4 @@ export {
   type FileEnvelope,
   type LoadResult,
 } from './serialize';
+export { createHistory, createTransaction, type HistoryEntry, type HistoryConfig } from './history';

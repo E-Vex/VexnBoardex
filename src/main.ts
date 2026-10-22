@@ -36,7 +36,7 @@ const store = createCameraStore(initialCamera);
 
 // The doc store is the single source of truth for the document (T-007 R10,
 // I-03): every mutation goes through dispatch.
-const docStore = createDocStore(emptyDoc());
+const docStore = createDocStore(emptyDoc(), { now: () => Date.now() });
 
 // The UI store is the single source of truth for selection and the drag
 // preview (T-008 R7, D-25). Never saved, never in history (I-05).
@@ -157,7 +157,23 @@ store.subscribe((cam) => {
   autosaver(docStore.get(), cam);
 });
 
-// Toolbar for export/import (T-13 R2).
+// --- Undo/Redo keyboard shortcuts (T-015) ---
+// Ctrl+Z = undo, Ctrl+Y / Ctrl+Shift+Z = redo.
+// Ignore when typing in inputs (D-27).
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      docStore.undo();
+    } else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) {
+      e.preventDefault();
+      docStore.redo();
+    }
+  }
+});
+
+// Toolbar for export/import + undo/redo (T-13 R2, T-015 R3).
 function createToolbar(): void {
   const toolbar = document.createElement('div');
   toolbar.id = 'vex-toolbar';
@@ -169,7 +185,20 @@ function createToolbar(): void {
     gap: 8px;
     z-index: 100;
     font-family: system-ui, sans-serif;
+    align-items: center;
   `;
+
+  const undoBtn = document.createElement('button');
+  undoBtn.textContent = '↶ Undo';
+  undoBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+  undoBtn.disabled = !docStore.canUndo();
+  undoBtn.onclick = () => docStore.undo();
+
+  const redoBtn = document.createElement('button');
+  redoBtn.textContent = '↷ Redo';
+  redoBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+  redoBtn.disabled = !docStore.canRedo();
+  redoBtn.onclick = () => docStore.redo();
 
   const exportBtn = document.createElement('button');
   exportBtn.textContent = 'Export';
@@ -183,14 +212,19 @@ function createToolbar(): void {
     const file = await pickFile();
     if (file) {
       const result = await importFile(file);
-      // Replace document with imported one.
-      // We can't easily replace docStore, so we'd need a reset mechanism.
-      // For now, log the result.
       console.log('[import]', result);
       for (const w of result.warnings) console.warn('[import]', w);
     }
   };
 
+  // Update button states on doc changes.
+  docStore.subscribe(() => {
+    undoBtn.disabled = !docStore.canUndo();
+    redoBtn.disabled = !docStore.canRedo();
+  });
+
+  toolbar.appendChild(undoBtn);
+  toolbar.appendChild(redoBtn);
   toolbar.appendChild(exportBtn);
   toolbar.appendChild(importBtn);
   document.body.appendChild(toolbar);
