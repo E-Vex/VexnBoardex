@@ -259,6 +259,202 @@ function compileEdgeCreate(doc: Doc, edge: Edge): Patch {
 }
 
 /**
+ * Compile `node.duplicate`: duplicates the given nodes with new IDs,
+ * placing them at an offset from the original. Edges between duplicated
+ * nodes are also duplicated with new IDs; edges to/from non-duplicated
+ * nodes are NOT duplicated (M6 requirement).
+ */
+function compileDuplicate(
+  doc: Doc,
+  ids: Id[],
+  offsetX: number | undefined,
+  offsetY: number | undefined,
+  newIds: Id[],
+  newEdgeIds: Id[]
+): Patch {
+  const ox = offsetX ?? 20;
+  const oy = offsetY ?? 20;
+  if (!Number.isFinite(ox)) {
+    throw new CommandError('node.duplicate: offsetX is not finite');
+  }
+  if (!Number.isFinite(oy)) {
+    throw new CommandError('node.duplicate: offsetY is not finite');
+  }
+  if (newIds.length !== ids.length) {
+    throw new CommandError('node.duplicate: newIds length must match ids length');
+  }
+  // Count edges that will be duplicated (edges between duplicated nodes).
+  let edgeCount = 0;
+  const uniqueIdSet = new Set(ids);
+  for (const [, edge] of Object.entries(doc.edges)) {
+    if (uniqueIdSet.has(edge.from.node) && uniqueIdSet.has(edge.to.node)) {
+      edgeCount++;
+    }
+  }
+  if (newEdgeIds.length !== edgeCount) {
+    throw new CommandError('node.duplicate: newEdgeIds length must match number of edges between duplicated nodes');
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`node.duplicate: unknown id "${id}"`);
+    }
+  }
+
+  // No-op: empty ids.
+  if (uniqueIds.length === 0) {
+    return emptyPatch();
+  }
+
+  const idMap = new Map<Id, Id>();
+  for (let i = 0; i < uniqueIds.length; i++) {
+    const newId = newIds[i]!;
+    idMap.set(uniqueIds[i]!, newId);
+  }
+
+  const nodes: Patch['nodes'] = {};
+  const edges: Patch['edges'] = {};
+  const newOrder: Id[] = [...doc.order];
+
+  // Create duplicated nodes with new IDs at offset positions.
+  for (let i = 0; i < uniqueIds.length; i++) {
+    const oldId = uniqueIds[i]!;
+    const newId = newIds[i]!;
+    const before = doc.nodes[oldId]!;
+    nodes[newId] = {
+      after: {
+        ...before,
+        id: newId,
+        x: before.x + ox,
+        y: before.y + oy,
+      },
+    };
+    // Insert new nodes in order right after the original (preserving relative order).
+    const insertIndex = newOrder.indexOf(oldId);
+    if (insertIndex >= 0) {
+      newOrder.splice(insertIndex + 1 + i, 0, newId!);
+    } else {
+      newOrder.push(newId!);
+    }
+  }
+
+  // Duplicate edges that connect two duplicated nodes.
+  let edgeIndex = 0;
+  for (const [, edge] of Object.entries(doc.edges)) {
+    const fromNewId = idMap.get(edge.from.node);
+    const toNewId = idMap.get(edge.to.node);
+    if (fromNewId && toNewId) {
+      const newEdgeId = newEdgeIds[edgeIndex++]!;
+      edges[newEdgeId] = {
+        after: {
+          ...edge,
+          id: newEdgeId,
+          from: { ...edge.from, node: fromNewId },
+          to: { ...edge.to, node: toNewId },
+        },
+      };
+    }
+  }
+
+  return {
+    nodes,
+    edges,
+    groups: {},
+    order: { before: doc.order, after: newOrder },
+  };
+}
+
+/**
+ * Compile `node.zOrder`: changes the z-order of the given nodes.
+ * Modes: 'front' (to top), 'back' (to bottom), 'forward' (up one), 'backward' (down one).
+ */
+function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' | 'backward'): Patch {
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`node.zOrder: unknown id "${id}"`);
+    }
+  }
+
+  // No-op: empty ids.
+  if (uniqueIds.length === 0) {
+    return emptyPatch();
+  }
+
+  const idSet = new Set(uniqueIds);
+  let newOrder = [...doc.order];
+
+  switch (mode) {
+    case 'front': {
+      // Move selected nodes to the end (top), preserving their relative order.
+      newOrder = newOrder.filter((id) => !idSet.has(id));
+      newOrder.push(...uniqueIds);
+      break;
+    }
+    case 'back': {
+      // Move selected nodes to the beginning (bottom), preserving their relative order.
+      newOrder = newOrder.filter((id) => !idSet.has(id));
+      newOrder.unshift(...uniqueIds.reverse());
+      break;
+    }
+    case 'forward': {
+      // Move each selected node up one position (if not already at top).
+      for (const id of uniqueIds) {
+        const idx = newOrder.indexOf(id);
+        if (idx >= 0 && idx < newOrder.length - 1) {
+          // Swap with next.
+          const next = newOrder[idx + 1]!;
+          newOrder[idx + 1] = newOrder[idx]!;
+          newOrder[idx] = next;
+        }
+      }
+      break;
+    }
+    case 'backward': {
+      // Move each selected node down one position (if not already at bottom).
+      // Process in reverse to avoid affecting indices of earlier nodes.
+      for (const id of uniqueIds.slice().reverse()) {
+        const idx = newOrder.indexOf(id);
+        if (idx > 0) {
+          const prev = newOrder[idx - 1]!;
+          newOrder[idx - 1] = newOrder[idx]!;
+          newOrder[idx] = prev;
+        }
+      }
+      break;
+    }
+  }
+
+  return {
+    nodes: {},
+    edges: {},
+    groups: {},
+    order: { before: doc.order, after: newOrder },
+  };
+}
+
+/**
  * Compile `edge.delete`: removes the listed edges. Duplicates are ignored;
  * an unknown id throws; empty `ids` returns an empty patch (T-009 R2).
  * Nodes and `order` are untouched.
@@ -307,6 +503,10 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileMove(doc, command.ids, command.dx, command.dy);
     case 'node.delete':
       return compileDelete(doc, command.ids);
+    case 'node.duplicate':
+      return compileDuplicate(doc, command.ids, command.offsetX, command.offsetY, command.newIds, command.newEdgeIds);
+    case 'node.zOrder':
+      return compileZOrder(doc, command.ids, command.mode);
     case 'edge.create':
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':

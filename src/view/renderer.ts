@@ -419,7 +419,7 @@ export function renderBoard(
   viewport: Viewport,
   camera: Camera,
   doc: Doc,
-  ui: UiState = { selection: [], drag: null },
+  ui: UiState = { selection: [], drag: null, boxSelect: null },
 ): void {
   const { width, height } = viewport;
 
@@ -556,4 +556,17 @@ export function renderBoard(
     }
   }
   ctx.restore();
+
+  // Draw box-select marquee (T-016) in screen coordinates.
+  if (ui.boxSelect) {
+    const r = ui.boxSelect;
+    ctx.strokeStyle = SELECTION_COLOR;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.setLineDash([]);
+    // Semi-transparent fill.
+    ctx.fillStyle = 'rgba(245, 166, 35, 0.1)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
 }

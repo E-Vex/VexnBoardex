@@ -29,7 +29,7 @@ function docOf(...ids: string[]): Doc {
 describe('createUiStore — initial state (R3)', () => {
   it('starts with an empty selection and no drag', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null });
+    expect(store.get()).toEqual({ selection: [], drag: null, boxSelect: null });
   });
 });
 
@@ -41,7 +41,7 @@ describe('setSelection — notify only on real change (R3)', () => {
     store.setSelection(['a']);
     expect(store.get().selection).toEqual(['a']);
     expect(fn).toHaveBeenCalledTimes(1);
-    expect(fn).toHaveBeenCalledWith({ selection: ['a'], drag: null });
+    expect(fn).toHaveBeenCalledWith({ selection: ['a'], drag: null, boxSelect: null });
   });
 
   it('the same ids in the same order are not a change', () => {
@@ -79,6 +79,7 @@ describe('setSelection — notify only on real change (R3)', () => {
     expect(store.get()).toEqual({
       selection: ['a', 'b'],
       drag: { ids: ['a'], dx: 10, dy: 20 },
+      boxSelect: null,
     });
   });
 });
@@ -137,7 +138,7 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null });
+    expect(store.get()).toEqual({ selection: ['a'], drag: null, boxSelect: null });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });

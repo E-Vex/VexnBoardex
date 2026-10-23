@@ -239,7 +239,7 @@ describe('property tests — invariants and undo/redo round trip (R9)', () => {
       // Sanity: the random doc must be valid (edges have no duplicate pairs).
       expect(validateDoc(doc)).toEqual([]);
 
-      const store = createDocStore(doc);
+      const store = createDocStore(doc, { now: () => Date.now() });
       const counter = { nextId: 0 };
       const steps = randInt(rng, 1, 25);
       const patches: Patch[] = [];

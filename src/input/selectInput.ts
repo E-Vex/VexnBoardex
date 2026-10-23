@@ -1,11 +1,12 @@
 /**
- * Select input (T-008 R6) — DOM glue for the select tool state machine
+ * Select input (T-008 R6, T-016) — DOM glue for the select tool state machine
  * (`selectTool.ts`). Converts pointer and keyboard events into machine
  * events and applies the emitted effects:
  *
  * - `select`  → `uiStore.setSelection`
  * - `setDrag` → `uiStore.setDrag`
  * - `dispatch`→ `docStore.dispatch` (I-03: the only mutation path)
+ * - `setBoxSelect` → `uiStore.setBoxSelect` (for marquee preview)
  *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
@@ -49,8 +50,8 @@ export interface SelectInput {
 }
 
 /**
- * Attach select/move/delete input. Returns a `detach()` that removes every
- * listener and releases pointer capture.
+ * Attach select/move/delete/box-select input. Returns a `detach()` that removes
+ * every listener and releases pointer capture.
  */
 export function attachSelectInput(opts: SelectInputOptions): SelectInput {
   const { canvas, cameraStore, docStore, uiStore, isPanActive } = opts;
@@ -70,6 +71,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           break;
         case 'dispatch':
           docStore.dispatch(effect.command);
+          break;
+        case 'setBoxSelect':
+          uiStore.setBoxSelect(effect.rect);
           break;
       }
     }
@@ -134,6 +138,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       screen,
       world,
       hitId,
+      shiftKey: e.shiftKey,
     });
   }
 
@@ -149,6 +154,32 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     if (state.mode === 'idle') return; // nobody is pressed on a node
     const { screen, world } = positions(e);
     feed({ type: 'pointerUp', pointerId: e.pointerId, screen, world });
+
+    // If box-select was active, finalize selection using the rect.
+    if (state.mode === 'boxSelecting' && state.boxSelectRect) {
+      const rect = state.boxSelectRect;
+      // Convert rect corners to world coordinates.
+      const topLeft = screenToWorld(cameraStore.get(), { x: rect.x, y: rect.y });
+      const bottomRight = screenToWorld(cameraStore.get(), { x: rect.x + rect.w, y: rect.y + rect.h });
+      const minX = Math.min(topLeft.x, bottomRight.x);
+      const maxX = Math.max(topLeft.x, bottomRight.x);
+      const minY = Math.min(topLeft.y, bottomRight.y);
+      const maxY = Math.max(topLeft.y, bottomRight.y);
+
+      const doc = docStore.get();
+      const selectedIds: string[] = [];
+      for (const [id, node] of Object.entries(doc.nodes)) {
+        const nodeRight = node.x + node.w;
+        const nodeBottom = node.y + node.h;
+        // Node intersects selection rect if its bounds overlap.
+        if (nodeRight >= minX && node.x <= maxX && nodeBottom >= minY && node.y <= maxY) {
+          selectedIds.push(id);
+        }
+      }
+      if (selectedIds.length > 0) {
+        uiStore.setSelection(selectedIds);
+      }
+    }
   }
 
   function onPointerCancel(e: PointerEvent): void {
@@ -158,16 +189,29 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onKeyDown(e: KeyboardEvent): void {
     const key = e.key;
-    if (key !== 'Escape' && key !== 'Delete' && key !== 'Backspace') return;
+    // Ignore if typing in an input/textarea.
     if (isEditableTarget(e.target)) return; // D-27: never steal typing
+    // Ignore Delete/Backspace with modifiers (D-27).
     if (
       (key === 'Delete' || key === 'Backspace') &&
       (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
     ) {
-      return; // D-27: not with modifier keys
+      return;
     }
     if (key === 'Backspace') e.preventDefault(); // never navigate back
-    feed({ type: 'key', key });
+    // Ctrl+A = select all (T-016).
+    if (key === 'a' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const doc = docStore.get();
+      const allIds = Object.keys(doc.nodes);
+      if (allIds.length > 0) {
+        uiStore.setSelection(allIds);
+      }
+      return;
+    }
+    // Ctrl+C = copy, Ctrl+V = paste, Ctrl+D = duplicate (T-016).
+    // These are handled in main.ts for clipboard access.
+    feed({ type: 'key', key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey });
   }
 
   function onBlur(): void {

@@ -24,10 +24,19 @@ export interface DragPreview {
   dy: number;
 }
 
-/** The UI state layer (D-25): selection ids plus the active drag preview. */
+/** A box-select marquee rectangle in screen coordinates (T-016). */
+export interface BoxSelectRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The UI state layer (D-25): selection ids plus the active drag preview and box-select rect. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
+  boxSelect: BoxSelectRect | null;
 }
 
 export interface UiStore {
@@ -37,6 +46,8 @@ export interface UiStore {
   setSelection(ids: Id[]): void;
   /** Replace the drag preview (null = no drag). No notification when equal. */
   setDrag(drag: DragPreview | null): void;
+  /** Replace the box-select rect (null = no box-select). No notification when equal. */
+  setBoxSelect(rect: BoxSelectRect | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
   subscribe(fn: (state: UiState) => void): () => void;
 }
@@ -58,16 +69,23 @@ function sameDrag(a: DragPreview | null, b: DragPreview | null): boolean {
   return a.dx === b.dx && a.dy === b.dy && sameIds(a.ids, b.ids);
 }
 
+/** True when two box-select rects are equal. */
+function sameBoxSelect(a: BoxSelectRect | null, b: BoxSelectRect | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
 /** True when two UI states are equal. */
 function sameUiState(a: UiState, b: UiState): boolean {
-  return sameIds(a.selection, b.selection) && sameDrag(a.drag, b.drag);
+  return sameIds(a.selection, b.selection) && sameDrag(a.drag, b.drag) && sameBoxSelect(a.boxSelect, b.boxSelect);
 }
 
 /**
- * Create a UI store initialised to `{ selection: [], drag: null }`.
+ * Create a UI store initialised to `{ selection: [], drag: null, boxSelect: null }`.
  */
 export function createUiStore(): UiStore {
-  let current: UiState = { selection: [], drag: null };
+  let current: UiState = { selection: [], drag: null, boxSelect: null };
   const subscribers = new Set<(state: UiState) => void>();
 
   return {
@@ -75,7 +93,7 @@ export function createUiStore(): UiStore {
       return current;
     },
     setSelection(ids: Id[]) {
-      const next: UiState = { selection: ids, drag: current.drag };
+      const next: UiState = { selection: ids, drag: current.drag, boxSelect: current.boxSelect };
       if (sameUiState(next, current)) return;
       current = next;
       for (const fn of subscribers) {
@@ -83,7 +101,15 @@ export function createUiStore(): UiStore {
       }
     },
     setDrag(drag: DragPreview | null) {
-      const next: UiState = { selection: current.selection, drag };
+      const next: UiState = { selection: current.selection, drag, boxSelect: current.boxSelect };
+      if (sameUiState(next, current)) return;
+      current = next;
+      for (const fn of subscribers) {
+        fn(current);
+      }
+    },
+    setBoxSelect(rect: BoxSelectRect | null) {
+      const next: UiState = { selection: current.selection, drag: current.drag, boxSelect: rect };
       if (sameUiState(next, current)) return;
       current = next;
       for (const fn of subscribers) {

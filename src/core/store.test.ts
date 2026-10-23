@@ -38,17 +38,17 @@ describe('createDocStore — initial doc validated', () => {
       groups: {},
       order: ['n1'],
     };
-    expect(() => createDocStore(bad)).toThrow();
+    expect(() => createDocStore(bad, { now: () => Date.now() })).toThrow();
   });
 
   it('succeeds when the initial doc is valid', () => {
-    expect(() => createDocStore(validDoc())).not.toThrow();
+    expect(() => createDocStore(validDoc(), { now: () => Date.now() })).not.toThrow();
   });
 });
 
 describe('dispatch — updates get() and returns the patch', () => {
   it('a create updates the store', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const patch = store.dispatch({
       type: 'node.create',
       node: node('n2'),
@@ -59,7 +59,7 @@ describe('dispatch — updates get() and returns the patch', () => {
   });
 
   it('a move updates the store', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     store.dispatch({
       type: 'node.move',
       ids: ['n1'],
@@ -72,7 +72,7 @@ describe('dispatch — updates get() and returns the patch', () => {
 
 describe('dispatch — applyPatch(previous, patch) deep-equals the new doc', () => {
   it('create round-trip', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const prev = store.get();
     const patch = store.dispatch({ type: 'node.create', node: node('n2') });
     const rebuilt = applyPatch(prev, patch);
@@ -80,7 +80,7 @@ describe('dispatch — applyPatch(previous, patch) deep-equals the new doc', () 
   });
 
   it('move round-trip', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const prev = store.get();
     const patch = store.dispatch({
       type: 'node.move',
@@ -95,7 +95,7 @@ describe('dispatch — applyPatch(previous, patch) deep-equals the new doc', () 
 
 describe('dispatch — subscribers receive (doc, patch)', () => {
   it('subscriber is called with the new doc and the patch', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     store.subscribe(fn);
     const patch = store.dispatch({ type: 'node.create', node: node('n2') });
@@ -106,7 +106,7 @@ describe('dispatch — subscribers receive (doc, patch)', () => {
   });
 
   it('multiple subscribers are called in subscription order', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const order: string[] = [];
     store.subscribe(() => order.push('a'));
     store.subscribe(() => order.push('b'));
@@ -118,7 +118,7 @@ describe('dispatch — subscribers receive (doc, patch)', () => {
 
 describe('dispatch — no notification for an empty patch', () => {
   it('move with dx=0, dy=0 does not notify', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     store.subscribe(fn);
     store.dispatch({ type: 'node.move', ids: ['n1'], dx: 0, dy: 0 });
@@ -126,7 +126,7 @@ describe('dispatch — no notification for an empty patch', () => {
   });
 
   it('move with empty ids does not notify', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     store.subscribe(fn);
     store.dispatch({ type: 'node.move', ids: [], dx: 5, dy: 5 });
@@ -134,7 +134,7 @@ describe('dispatch — no notification for an empty patch', () => {
   });
 
   it('delete with empty ids does not notify', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     store.subscribe(fn);
     store.dispatch({ type: 'node.delete', ids: [] });
@@ -144,7 +144,7 @@ describe('dispatch — no notification for an empty patch', () => {
 
 describe('subscribe — unsubscribe works', () => {
   it('the subscriber stops receiving after unsubscribe', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     const unsub = store.subscribe(fn);
     store.dispatch({ type: 'node.create', node: node('n2') });
@@ -157,7 +157,7 @@ describe('subscribe — unsubscribe works', () => {
 
 describe('dispatch — a throwing command leaves the doc unchanged and notifies nobody', () => {
   it('CommandError does not change the document', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const before = store.get();
     expect(() =>
       store.dispatch({ type: 'node.move', ids: ['nope'], dx: 1, dy: 1 }),
@@ -166,7 +166,7 @@ describe('dispatch — a throwing command leaves the doc unchanged and notifies 
   });
 
   it('CommandError does not notify subscribers', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const fn = vi.fn();
     store.subscribe(fn);
     expect(() =>
@@ -176,7 +176,7 @@ describe('dispatch — a throwing command leaves the doc unchanged and notifies 
   });
 
   it('unknown command type does not change the document', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     const before = store.get();
     expect(() =>
       store.dispatch({ type: 'unknown' } as unknown as never),
@@ -188,12 +188,12 @@ describe('dispatch — a throwing command leaves the doc unchanged and notifies 
 // T-008 R2 / D-29 — the revision counter.
 describe('getRevision — doc store revision counter (T-008 R2)', () => {
   it('starts at 0', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     expect(store.getRevision()).toBe(0);
   });
 
   it('increments by 1 for every non-empty applied patch', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     store.dispatch({ type: 'node.move', ids: ['n1'], dx: 1, dy: 0 });
     expect(store.getRevision()).toBe(1);
     store.dispatch({ type: 'node.move', ids: ['n1'], dx: 0, dy: 1 });
@@ -203,7 +203,7 @@ describe('getRevision — doc store revision counter (T-008 R2)', () => {
   });
 
   it('is unchanged for an empty patch', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     store.dispatch({ type: 'node.move', ids: ['n1'], dx: 0, dy: 0 });
     expect(store.getRevision()).toBe(0);
     store.dispatch({ type: 'node.move', ids: [], dx: 5, dy: 5 });
@@ -213,7 +213,7 @@ describe('getRevision — doc store revision counter (T-008 R2)', () => {
   });
 
   it('is unchanged for a throwing command', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     expect(() =>
       store.dispatch({ type: 'node.move', ids: ['nope'], dx: 1, dy: 1 }),
     ).toThrow(CommandError);
@@ -225,7 +225,7 @@ describe('getRevision — doc store revision counter (T-008 R2)', () => {
   });
 
   it('increments exactly once per applied patch, not per subscriber call', () => {
-    const store = createDocStore(validDoc());
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
     store.subscribe(() => undefined);
     store.subscribe(() => undefined);
     store.dispatch({ type: 'node.move', ids: ['n1'], dx: 1, dy: 0 });
