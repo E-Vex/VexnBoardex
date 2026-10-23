@@ -36,7 +36,7 @@ const store = createCameraStore(initialCamera);
 
 // The doc store is the single source of truth for the document (T-007 R10,
 // I-03): every mutation goes through dispatch.
-const docStore = createDocStore(emptyDoc());
+const docStore = createDocStore(emptyDoc(), { now: () => Date.now() });
 
 // The UI store is the single source of truth for selection and the drag
 // preview (T-008 R7, D-25). Never saved, never in history (I-05).
@@ -157,7 +157,150 @@ store.subscribe((cam) => {
   autosaver(docStore.get(), cam);
 });
 
-// Toolbar for export/import (T-13 R2).
+// --- Clipboard for copy/paste (T-016) ---
+interface ClipboardData {
+  nodes: { id: string; [key: string]: unknown }[];
+  edges: { id: string; [key: string]: unknown }[];
+}
+let clipboard: ClipboardData | null = null;
+
+// --- Keyboard shortcuts (T-015, T-016) ---
+// Ctrl+Z = undo, Ctrl+Y/Ctrl+Shift+Z = redo.
+// Ctrl+C = copy, Ctrl+V = paste, Ctrl+D = duplicate.
+// Ctrl+A = select all.
+// Ctrl+Shift+Up/Down = bring to front / send to back.
+// Arrow keys = nudge (handled in selectTool).
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  const isMac = navigator.platform.includes('Mac');
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  const shift = e.shiftKey;
+
+  if (mod) {
+    switch (e.key.toLowerCase()) {
+      case 'z':
+        if (shift) {
+          e.preventDefault();
+          docStore.redo();
+        } else {
+          e.preventDefault();
+          docStore.undo();
+        }
+        break;
+      case 'y':
+        e.preventDefault();
+        docStore.redo();
+        break;
+      case 'c':
+        e.preventDefault();
+        copySelection();
+        break;
+      case 'v':
+        e.preventDefault();
+        pasteSelection();
+        break;
+      case 'd':
+        e.preventDefault();
+        duplicateSelection();
+        break;
+      case 'a':
+        e.preventDefault();
+        selectAll();
+        break;
+      case 'arrowup':
+        if (shift) {
+          e.preventDefault();
+          bringToFront();
+        }
+        break;
+      case 'arrowdown':
+        if (shift) {
+          e.preventDefault();
+          sendToBack();
+        }
+        break;
+    }
+  }
+});
+
+function copySelection(): void {
+  const selection = uiStore.get().selection;
+  if (selection.length === 0) return;
+  const doc = docStore.get();
+  const nodes = selection.map((id) => {
+    const node = doc.nodes[id];
+    if (!node) return null;
+    return { ...node, id: node.id } as { id: string; [key: string]: unknown };
+  }).filter((n): n is { id: string; [key: string]: unknown } => n !== null);
+  // Include edges between selected nodes.
+  const edges: { id: string; [key: string]: unknown }[] = [];
+  for (const [, edge] of Object.entries(doc.edges)) {
+    if (selection.includes(edge.from.node) && selection.includes(edge.to.node)) {
+      edges.push({ ...edge });
+    }
+  }
+  clipboard = { nodes, edges };
+}
+
+function pasteSelection(): void {
+  if (!clipboard || clipboard.nodes.length === 0) return;
+  const newIds = clipboard.nodes.map(() => crypto.randomUUID());
+  const edgeCount = clipboard.edges.length;
+  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
+  docStore.dispatch({
+    type: 'node.duplicate',
+    ids: clipboard.nodes.map((n) => n.id),
+    offsetX: 20,
+    offsetY: 20,
+    newIds,
+    newEdgeIds,
+  });
+}
+
+function duplicateSelection(): void {
+  const selection = uiStore.get().selection;
+  if (selection.length === 0) return;
+  const newIds = selection.map(() => crypto.randomUUID());
+  // Count edges between selected nodes.
+  const doc = docStore.get();
+  let edgeCount = 0;
+  for (const [, edge] of Object.entries(doc.edges)) {
+    if (selection.includes(edge.from.node) && selection.includes(edge.to.node)) {
+      edgeCount++;
+    }
+  }
+  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
+  docStore.dispatch({
+    type: 'node.duplicate',
+    ids: selection,
+    offsetX: 20,
+    offsetY: 20,
+    newIds,
+    newEdgeIds,
+  });
+}
+
+function selectAll(): void {
+  const doc = docStore.get();
+  const allIds = Object.keys(doc.nodes);
+  if (allIds.length > 0) {
+    uiStore.setSelection(allIds);
+  }
+}
+
+function bringToFront(): void {
+  const selection = uiStore.get().selection;
+  if (selection.length === 0) return;
+  docStore.dispatch({ type: 'node.zOrder', ids: selection, mode: 'front' });
+}
+
+function sendToBack(): void {
+  const selection = uiStore.get().selection;
+  if (selection.length === 0) return;
+  docStore.dispatch({ type: 'node.zOrder', ids: selection, mode: 'back' });
+}
+
+// Toolbar for export/import + edit actions (T-13 R2, T-016).
 function createToolbar(): void {
   const toolbar = document.createElement('div');
   toolbar.id = 'vex-toolbar';
@@ -169,30 +312,59 @@ function createToolbar(): void {
     gap: 8px;
     z-index: 100;
     font-family: system-ui, sans-serif;
+    flex-wrap: wrap;
   `;
 
-  const exportBtn = document.createElement('button');
-  exportBtn.textContent = 'Export';
-  exportBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
-  exportBtn.onclick = () => exportFile(docStore.get(), store.get());
+  const makeBtn = (text: string, onClick: () => void, disabled = false) => {
+    const btn = document.createElement('button');
+    btn.textContent = text;
+    btn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+    btn.disabled = disabled;
+    btn.onclick = onClick;
+    return btn;
+  };
 
-  const importBtn = document.createElement('button');
-  importBtn.textContent = 'Import';
-  importBtn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
-  importBtn.onclick = async () => {
+  toolbar.appendChild(makeBtn('↶ Undo', () => docStore.undo(), !docStore.canUndo()));
+  toolbar.appendChild(makeBtn('↷ Redo', () => docStore.redo(), !docStore.canRedo()));
+  toolbar.appendChild(makeBtn('Copy', copySelection, uiStore.get().selection.length === 0));
+  toolbar.appendChild(makeBtn('Paste', pasteSelection, !clipboard || clipboard.nodes.length === 0));
+  toolbar.appendChild(makeBtn('Duplicate', duplicateSelection, uiStore.get().selection.length === 0));
+  toolbar.appendChild(makeBtn('Select All', selectAll, docStore.get().order.length === 0));
+  toolbar.appendChild(makeBtn('Front', bringToFront, uiStore.get().selection.length === 0));
+  toolbar.appendChild(makeBtn('Back', sendToBack, uiStore.get().selection.length === 0));
+  toolbar.appendChild(makeBtn('Export', () => exportFile(docStore.get(), store.get())));
+  toolbar.appendChild(makeBtn('Import', async () => {
     const file = await pickFile();
     if (file) {
       const result = await importFile(file);
-      // Replace document with imported one.
-      // We can't easily replace docStore, so we'd need a reset mechanism.
-      // For now, log the result.
       console.log('[import]', result);
       for (const w of result.warnings) console.warn('[import]', w);
     }
-  };
+  }));
 
-  toolbar.appendChild(exportBtn);
-  toolbar.appendChild(importBtn);
+  // Update button states on doc/selection changes.
+  const updateToolbar = () => {
+    const sel = uiStore.get().selection;
+    const canUndo = docStore.canUndo();
+    const canRedo = docStore.canRedo();
+    const hasSel = sel.length > 0;
+    const hasClipboard = !!clipboard && clipboard.nodes.length > 0;
+    const hasNodes = docStore.get().order.length > 0;
+    toolbar.querySelectorAll('button').forEach((btn, i) => {
+      // Buttons in order: Undo, Redo, Copy, Paste, Duplicate, Select All, Front, Back, Export, Import
+      if (i === 0) btn.disabled = !canUndo;
+      else if (i === 1) btn.disabled = !canRedo;
+      else if (i === 2) btn.disabled = !hasSel;
+      else if (i === 3) btn.disabled = !hasClipboard;
+      else if (i === 4) btn.disabled = !hasSel;
+      else if (i === 5) btn.disabled = !hasNodes;
+      else if (i === 6) btn.disabled = !hasSel;
+      else if (i === 7) btn.disabled = !hasSel;
+    });
+  };
+  docStore.subscribe(updateToolbar);
+  uiStore.subscribe(updateToolbar);
+
   document.body.appendChild(toolbar);
 }
 createToolbar();

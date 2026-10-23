@@ -33,8 +33,9 @@ function down(
   hitId: string | null,
   pointerId = 1,
   button = 0,
+  shiftKey = false,
 ): SelectEvent {
-  return { type: 'pointerDown', button, pointerId, screen, world, hitId };
+  return { type: 'pointerDown', button, pointerId, screen, world, hitId, shiftKey };
 }
 
 function move(
@@ -51,6 +52,10 @@ function up(
   pointerId = 1,
 ): SelectEvent {
   return { type: 'pointerUp', pointerId, screen, world };
+}
+
+function keyEvent(key: string, shiftKey = false, ctrlKey = false, metaKey = false): SelectEvent {
+  return { type: 'key', key, shiftKey, ctrlKey, metaKey };
 }
 
 /** Effects of one kind only, for concise assertions. */
@@ -75,10 +80,10 @@ describe('selectTool — pointerDown (D-26)', () => {
     expect(r.effects).toEqual([]);
   });
 
-  it('a left press on empty space clears the selection and starts nothing', () => {
+  it('a left press on empty space clears the selection and starts box-select', () => {
     const r = run(initialSelectState(), down(p(10, 10), p(-5, -5), null), SEL_A);
-    expect(r.state.mode).toBe('idle');
-    expect(r.effects).toEqual([{ type: 'select', ids: [] }]);
+    expect(r.state.mode).toBe('boxSelecting');
+    expect(r.effects).toEqual([{ type: 'select', ids: [] }, { type: 'setBoxSelect', rect: { x: 10, y: 10, w: 0, h: 0 } }]);
   });
 
   it('a left press on empty space with an empty selection emits nothing', () => {
@@ -264,28 +269,28 @@ describe('selectTool — cancel paths produce no command (D-26)', () => {
     return run(st, move(p(200, 100), p(100, 0)), NO_SELECTION).state;
   }
 
-  it('Escape while dragging cancels: setDrag(null), no dispatch', () => {
-    const r = run(draggingState(), { type: 'key', key: 'Escape' }, NO_SELECTION);
+  it('Escape while dragging cancels: setDrag(null), setBoxSelect(null), no dispatch', () => {
+    const r = run(draggingState(), keyEvent('Escape'), NO_SELECTION);
     expect(r.state.mode).toBe('idle');
-    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }]);
+    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]);
   });
 
-  it('pointercancel while dragging cancels: setDrag(null), no dispatch', () => {
+  it('pointercancel while dragging cancels: setDrag(null), setBoxSelect(null), no dispatch', () => {
     const r = run(draggingState(), { type: 'pointerCancel', pointerId: 1 }, NO_SELECTION);
     expect(r.state.mode).toBe('idle');
-    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }]);
+    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]);
   });
 
-  it('blur while dragging cancels: setDrag(null), no dispatch', () => {
+  it('blur while dragging cancels: setDrag(null), setBoxSelect(null), no dispatch', () => {
     const r = run(draggingState(), { type: 'blur' }, NO_SELECTION);
     expect(r.state.mode).toBe('idle');
-    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }]);
+    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]);
   });
 
   it('Escape while pressed (no drag yet) cancels with no effects', () => {
     const st = run(initialSelectState(), down(p(100, 100), p(0, 0), 'a'), NO_SELECTION)
       .state;
-    const r = run(st, { type: 'key', key: 'Escape' }, NO_SELECTION);
+    const r = run(st, keyEvent('Escape'), NO_SELECTION);
     expect(r.state.mode).toBe('idle');
     expect(r.effects).toEqual([]);
   });
@@ -298,7 +303,7 @@ describe('selectTool — cancel paths produce no command (D-26)', () => {
 
   it('after Escape the drag is over: moves and pointer-up do nothing', () => {
     let st = draggingState();
-    st = run(st, { type: 'key', key: 'Escape' }, NO_SELECTION).state;
+    st = run(st, keyEvent('Escape'), NO_SELECTION).state;
     const r1 = run(st, move(p(300, 100), p(200, 0)), NO_SELECTION);
     expect(r1.state.mode).toBe('idle');
     expect(r1.effects).toEqual([]);
@@ -309,7 +314,7 @@ describe('selectTool — cancel paths produce no command (D-26)', () => {
 
 describe('selectTool — keys (D-27)', () => {
   it('Delete with a selection dispatches one node.delete', () => {
-    const r = run(initialSelectState(), { type: 'key', key: 'Delete' }, { selection: ['a', 'b'] });
+    const r = run(initialSelectState(), keyEvent('Delete'), { selection: ['a', 'b'] });
     expect(r.effects).toEqual([
       { type: 'dispatch', command: { type: 'node.delete', ids: ['a', 'b'] } },
     ]);
@@ -317,21 +322,21 @@ describe('selectTool — keys (D-27)', () => {
   });
 
   it('Backspace behaves exactly like Delete', () => {
-    const r = run(initialSelectState(), { type: 'key', key: 'Backspace' }, SEL_A);
+    const r = run(initialSelectState(), keyEvent('Backspace'), SEL_A);
     expect(r.effects).toEqual([
       { type: 'dispatch', command: { type: 'node.delete', ids: ['a'] } },
     ]);
   });
 
   it('Delete with an empty selection does nothing', () => {
-    const r = run(initialSelectState(), { type: 'key', key: 'Delete' }, NO_SELECTION);
+    const r = run(initialSelectState(), keyEvent('Delete'), NO_SELECTION);
     expect(r.effects).toEqual([]);
   });
 
   it('Delete while dragging is ignored', () => {
     let st = run(initialSelectState(), down(p(100, 100), p(0, 0), 'a'), NO_SELECTION).state;
     st = run(st, move(p(200, 100), p(100, 0)), NO_SELECTION).state;
-    const r = run(st, { type: 'key', key: 'Delete' }, SEL_A);
+    const r = run(st, keyEvent('Delete'), SEL_A);
     expect(r.state.mode).toBe('dragging');
     expect(r.effects).toEqual([]);
   });
@@ -339,20 +344,20 @@ describe('selectTool — keys (D-27)', () => {
   it('Delete while pressed (button held, no drag yet) is ignored', () => {
     const st = run(initialSelectState(), down(p(100, 100), p(0, 0), 'a'), NO_SELECTION)
       .state;
-    const r = run(st, { type: 'key', key: 'Delete' }, SEL_A);
+    const r = run(st, keyEvent('Delete'), SEL_A);
     expect(r.state.mode).toBe('pressed');
     expect(r.effects).toEqual([]);
   });
 
   it('Escape when idle does nothing', () => {
-    const r = run(initialSelectState(), { type: 'key', key: 'Escape' }, SEL_A);
+    const r = run(initialSelectState(), keyEvent('Escape'), SEL_A);
     expect(r.state.mode).toBe('idle');
     expect(r.effects).toEqual([]);
   });
 
   it('any other key is ignored', () => {
-    for (const key of ['a', 'Enter', 'Tab', 'ArrowLeft', 'x']) {
-      const r = run(initialSelectState(), { type: 'key', key }, SEL_A);
+    for (const key of ['a', 'Enter', 'Tab', 'x']) {
+      const r = run(initialSelectState(), keyEvent(key), SEL_A);
       expect(r.effects).toEqual([]);
     }
   });

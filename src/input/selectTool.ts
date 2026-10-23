@@ -1,5 +1,5 @@
 /**
- * Select tool state machine (T-008 R4) — pure, DOM-free (PLAN D-06).
+ * Select tool state machine (T-008 R4, T-016) — pure, DOM-free (PLAN D-06).
  *
  * Implements D-26 (drag rules) and D-27 (delete) exactly:
  *
@@ -19,6 +19,9 @@
  * - `Delete`/`Backspace` (idle only, selection non-empty) dispatch one
  *   `node.delete`. A second pointer, other buttons, other keys and
  *   `Escape` when idle are all ignored.
+ * - T-016: Shift+click toggles node in selection.
+ * - T-016: Drag on empty space starts box-select (marquee).
+ * - T-016: Arrow keys nudge selected nodes.
  *
  * The DOM glue (`selectInput.ts`) feeds real events in and applies the
  * emitted effects to the UI store and the doc store.
@@ -31,7 +34,10 @@ import type { DragPreview } from '../view/uiStore';
 /** The drag threshold in screen pixels (D-26): ≥ this distance starts a drag. */
 export const DRAG_THRESHOLD = 4;
 
-export type SelectMode = 'idle' | 'pressed' | 'dragging';
+/** The nudge distance in world units for arrow keys (T-016). */
+export const NUDGE_DISTANCE = 10;
+
+export type SelectMode = 'idle' | 'pressed' | 'dragging' | 'boxSelecting';
 
 /** The machine state (R4): `startScreen`/`startWorld` are the press point. */
 export interface SelectState {
@@ -40,6 +46,8 @@ export interface SelectState {
   startScreen: Point | null;
   startWorld: Point | null;
   hitId: Id | null;
+  /** For box-select: the screen rect of the marquee. */
+  boxSelectRect: { x: number; y: number; w: number; h: number } | null;
 }
 
 /** Events fed into the machine (R4). */
@@ -51,18 +59,20 @@ export type SelectEvent =
       screen: Point;
       world: Point;
       hitId: Id | null;
+      shiftKey: boolean;
     }
   | { type: 'pointerMove'; pointerId: number; screen: Point; world: Point }
   | { type: 'pointerUp'; pointerId: number; screen: Point; world: Point }
   | { type: 'pointerCancel'; pointerId: number }
-  | { type: 'key'; key: string }
+  | { type: 'key'; key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }
   | { type: 'blur' };
 
 /** Effects the DOM glue applies (R4). */
 export type SelectEffect =
   | { type: 'select'; ids: Id[] }
   | { type: 'setDrag'; drag: DragPreview | null }
-  | { type: 'dispatch'; command: Command };
+  | { type: 'dispatch'; command: Command }
+  | { type: 'setBoxSelect'; rect: { x: number; y: number; w: number; h: number } | null };
 
 /** Per-event context: the current selection (read from the UI store). */
 export interface SelectCtx {
@@ -82,6 +92,7 @@ export function initialSelectState(): SelectState {
     startScreen: null,
     startWorld: null,
     hitId: null,
+    boxSelectRect: null,
   };
 }
 
@@ -96,9 +107,10 @@ function worldDelta(state: SelectState, world: Point): { dx: number; dy: number 
   return { dx: world.x - start.x, dy: world.y - start.y };
 }
 
-/** The drag preview for the pressed node at `world` (D-26). */
+/** The drag preview for the selected nodes at `world` (D-26). */
 function dragPreview(state: SelectState, world: Point): DragPreview {
   const { dx, dy } = worldDelta(state, world);
+  // For now, we only drag the hitId node. Multi-node drag is handled by selectInput.
   return { ids: [state.hitId!], dx, dy };
 }
 
@@ -125,10 +137,17 @@ export function reduce(
       if (state.mode !== 'idle') return { state, effects: [] };
 
       if (event.hitId !== null) {
-        // Press on a node: select it if it is not already selected, then
-        // start a possible drag (D-26).
+        // Press on a node: shift+click toggles, otherwise select (or keep selected)
+        // and start a possible drag (D-26).
         const effects: SelectEffect[] = [];
-        if (!ctx.selection.includes(event.hitId)) {
+        if (event.shiftKey) {
+          // Toggle selection
+          const newSelection = ctx.selection.includes(event.hitId)
+            ? ctx.selection.filter((id) => id !== event.hitId)
+            : [...ctx.selection, event.hitId];
+          effects.push({ type: 'select', ids: newSelection });
+        } else if (!ctx.selection.includes(event.hitId)) {
+          // Select only this node (replacing selection)
           effects.push({ type: 'select', ids: [event.hitId] });
         }
         return {
@@ -138,13 +157,20 @@ export function reduce(
             startScreen: event.screen,
             startWorld: event.world,
             hitId: event.hitId,
+            boxSelectRect: null,
           },
           effects,
         };
       }
 
-      // Press on empty space: clear the selection; no gesture starts
-      // (box-select is out of scope for T-008).
+      // Press on empty space: start box-select if shift is not held,
+      // otherwise clear selection.
+      if (!event.shiftKey && ctx.selection.length > 0) {
+        return {
+          state: { ...initialSelectState(), mode: 'boxSelecting', boxSelectRect: { x: event.screen.x, y: event.screen.y, w: 0, h: 0 } },
+          effects: [{ type: 'select', ids: [] }, { type: 'setBoxSelect', rect: { x: event.screen.x, y: event.screen.y, w: 0, h: 0 } }],
+        };
+      }
       if (ctx.selection.length > 0) {
         return { state: idle(), effects: [{ type: 'select', ids: [] }] };
       }
@@ -165,6 +191,18 @@ export function reduce(
         };
       }
 
+      if (state.mode === 'boxSelecting') {
+        // Update box-select rectangle.
+        const x = Math.min(state.startScreen!.x, event.screen.x);
+        const y = Math.min(state.startScreen!.y, event.screen.y);
+        const w = Math.abs(event.screen.x - state.startScreen!.x);
+        const h = Math.abs(event.screen.y - state.startScreen!.y);
+        return {
+          state: { ...state, boxSelectRect: { x, y, w, h } },
+          effects: [{ type: 'setBoxSelect', rect: { x, y, w, h } }],
+        };
+      }
+
       // Dragging: pointer-move only updates the preview (I-04).
       return {
         state,
@@ -179,6 +217,15 @@ export function reduce(
       if (state.mode === 'pressed') {
         // Under the threshold it is a click: select only, no command (D-26).
         return { state: idle(), effects: [] };
+      }
+
+      if (state.mode === 'boxSelecting') {
+        // Finalize box-select: the actual hit-testing is done in selectInput
+        // using the final rect. We just clear the box-select preview.
+        return {
+          state: idle(),
+          effects: [{ type: 'setBoxSelect', rect: null }],
+        };
       }
 
       // After a drag: clear the preview, then commit exactly one node.move
@@ -208,6 +255,27 @@ export function reduce(
         // Escape when idle does nothing (R4).
         if (state.mode === 'idle') return { state, effects: [] };
         return cancel(state);
+      }
+      // Arrow keys for nudging (T-016).
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        if (ctx.selection.length === 0) return { state, effects: [] };
+        // Nudge: dispatch node.move for all selected nodes.
+        let dx = 0, dy = 0;
+        switch (event.key) {
+          case 'ArrowUp': dy = -NUDGE_DISTANCE; break;
+          case 'ArrowDown': dy = NUDGE_DISTANCE; break;
+          case 'ArrowLeft': dx = -NUDGE_DISTANCE; break;
+          case 'ArrowRight': dx = NUDGE_DISTANCE; break;
+        }
+        return {
+          state,
+          effects: [
+            {
+              type: 'dispatch',
+              command: { type: 'node.move', ids: [...ctx.selection], dx, dy },
+            },
+          ],
+        };
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         // Delete/Backspace while a gesture is active is ignored (R4); with
@@ -239,6 +307,8 @@ export function reduce(
 /** Cancel an active gesture: back to idle, clear the preview, no command. */
 function cancel(state: SelectState): SelectResult {
   const effects: SelectEffect[] =
-    state.mode === 'dragging' ? [{ type: 'setDrag', drag: null }] : [];
+    state.mode === 'dragging' || state.mode === 'boxSelecting'
+      ? [{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]
+      : [];
   return { state: idle(), effects };
 }

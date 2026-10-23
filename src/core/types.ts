@@ -90,5 +90,7 @@ export type Command =
   | { type: 'node.create'; node: Node }
   | { type: 'node.move'; ids: Id[]; dx: number; dy: number }
   | { type: 'node.delete'; ids: Id[] }
+  | { type: 'node.duplicate'; ids: Id[]; offsetX?: number; offsetY?: number; newIds: Id[]; newEdgeIds: Id[] }
+  | { type: 'node.zOrder'; ids: Id[]; mode: 'front' | 'back' | 'forward' | 'backward' }
   | { type: 'edge.create'; edge: Edge }
   | { type: 'edge.delete'; ids: Id[] };

@@ -323,6 +323,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       drag: null,
+      boxSelect: null,
     });
 
     // Origin marker (1) + node border (1) + 4 handles (4) + outline (1) = 7 strokes total.
@@ -354,6 +355,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: [],
       drag: null,
+      boxSelect: null,
     });
 
     // Origin marker + the node's own border stroke = 2 strokes.
@@ -372,6 +374,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       drag: null,
+      boxSelect: null,
     });
 
     // The outline path starts at (x - 3 + 11, y - 3) = (-92, -63)…
@@ -394,6 +397,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       renderBoard(ctx, { width: 1280, height: 720 }, zc, docOf(node), {
         selection: ['a'],
         drag: null,
+        boxSelect: null,
       });
 
       const lineWidths = ctx.calls
@@ -414,6 +418,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(off, on), {
       selection: ['off', 'on'],
       drag: null,
+      boxSelect: null,
     });
 
     // Only the visible node: 2 nodes' worth of paths would be 8 arcTo.
@@ -436,6 +441,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      boxSelect: null,
     });
 
     // Node a is drawn at (-300+50, -100+25) = (-250, -75): its first arcTo
@@ -460,6 +466,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      boxSelect: null,
     });
 
     const fillText = ctx.calls.find((c) => c.name === 'fillText')!;
@@ -475,6 +482,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      boxSelect: null,
     });
 
     // a is first in doc.order and is still drawn (and texted) first.
@@ -493,6 +501,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
+      boxSelect: null,
     });
 
     expect(countCalls(ctx, 'arcTo')).toBe(0);
@@ -553,7 +562,11 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60 });
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge));
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
+      selection: [],
+      drag: null,
+      boxSelect: null,
+    });
 
     // Grid rects (dots) happen first, then edge lineTo, then node arcTo.
     const firstRectIdx = firstIndex(ctx, 'rect');
@@ -574,6 +587,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      boxSelect: null,
     });
 
     // The edge's 'from' endpoint should be at a's dragged position.
@@ -588,7 +602,11 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60, w: 200, h: 120 });
     const edge = makeEdge('e1', 'a', 'b', 'auto', 'auto', 'link');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge));
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
+      selection: [],
+      drag: null,
+      boxSelect: null,
+    });
 
     // Label should be drawn with fillText at the midpoint of the edge.
     // With auto anchors: from is at right edge of a (center y=0), to is at left edge of b (center y=0).
@@ -605,7 +623,11 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60 });
     const edge = makeEdge('e1', 'a', 'b'); // no label
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge));
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
+      selection: [],
+      drag: null,
+      boxSelect: null,
+    });
 
     const fillTextCalls = ctx.calls.filter((c) => c.name === 'fillText');
     // Only node texts should appear
@@ -618,7 +640,11 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 6000, y: 5000 });
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge));
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
+      selection: [],
+      drag: null,
+      boxSelect: null,
+    });
 
     // No edge drawing calls (beyond origin/grid which don't use lineTo for edges)
     // We expect at least origin marker (moveTo/lineTo) but no additional edge line

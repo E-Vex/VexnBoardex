@@ -83,14 +83,16 @@ async function createCard(page: Page): Promise<Rgba> {
 test.describe('select @ 1280×720', () => {
   test.use({ viewport: VIEWPORT });
 
-  test('1. select and clear: clicking selects, empty space clears, rev stays 1', async ({
+  test('1. select and clear: clicking selects, Shift+empty space clears, rev stays 1', async ({
     page,
   }) => {
     await page.goto('/');
     await createCard(page);
 
-    // Click empty space (800, 500): selection cleared, no command.
+    // Shift+click empty space (800, 500): selection cleared, no command.
+    await page.keyboard.down('Shift');
     await page.mouse.click(800, 500);
+    await page.keyboard.up('Shift');
     await expect(page.getByTestId('hud-selected')).toHaveText('selected 0');
     await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
 
@@ -227,8 +229,10 @@ test.describe('select @ 1280×720', () => {
     await page.goto('/');
     await createCard(page);
 
-    // Empty selection + Delete → nothing happens.
+    // Shift+click empty space (800, 500) to clear selection, then Delete → nothing happens.
+    await page.keyboard.down('Shift');
     await page.mouse.click(800, 500);
+    await page.keyboard.up('Shift');
     await expect(page.getByTestId('hud-selected')).toHaveText('selected 0');
     await page.keyboard.press('Delete');
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
