@@ -76,11 +76,26 @@ export async function clearAutosave(): Promise<void> {
  * Call `autosave(doc, view)` on every document/view change.
  * The actual write happens after DEBOUNCE_MS of inactivity.
  */
-export function createAutosaver(): (doc: Doc, view?: { x: number; y: number; zoom: number }) => void {
+export interface Autosaver {
+  update(doc: Doc, view?: { x: number; y: number; zoom: number }): void;
+  flush(): Promise<void>;
+}
+
+/**
+ * Create a debounced autosave.
+ * Call `autosaver.update(doc, view)` on every document/view change.
+ * The actual write happens after DEBOUNCE_MS of inactivity, or immediately
+ * when `autosaver.flush()` is called.
+ */
+export function createAutosaver(): Autosaver {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let pendingEnvelope: FileEnvelope | null = null;
 
-  const flush = async () => {
+  const flush = async (): Promise<void> => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
     if (pendingEnvelope) {
       try {
         await saveAutosave(pendingEnvelope);
@@ -89,21 +104,16 @@ export function createAutosaver(): (doc: Doc, view?: { x: number; y: number; zoo
       }
       pendingEnvelope = null;
     }
-    timeoutId = null;
   };
 
-  return (doc: Doc, view?: { x: number; y: number; zoom: number }) => {
-    const json = serializeDoc(doc, view);
-    pendingEnvelope = JSON.parse(json);
+  return {
+    update(doc: Doc, view?: { x: number; y: number; zoom: number }) {
+      const json = serializeDoc(doc, view);
+      pendingEnvelope = JSON.parse(json);
 
-    if (timeoutId) clearTimeout(timeoutId);
-    timeoutId = setTimeout(flush, DEBOUNCE_MS);
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(flush, DEBOUNCE_MS);
+    },
+    flush,
   };
-}
-
-/** Force-flush any pending autosave immediately. */
-export async function flushAutosave(_autosaver: ReturnType<typeof createAutosaver>): Promise<void> {
-  // The autosaver doesn't expose its internal state, so we can't directly flush.
-  // In practice, the debounce will fire within 1s. For explicit "save now",
-  // the caller should call saveAutosave directly with the current state.
 }

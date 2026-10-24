@@ -415,12 +415,13 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
     case 'back': {
       // Move selected nodes to the beginning (bottom), preserving their relative order.
       newOrder = newOrder.filter((id) => !idSet.has(id));
-      newOrder.unshift(...uniqueIds.reverse());
+      newOrder.unshift(...uniqueIds);
       break;
     }
     case 'forward': {
       // Move each selected node up one position (if not already at top).
-      for (const id of uniqueIds) {
+      // Process in reverse to avoid swapping selected nodes with each other.
+      for (const id of uniqueIds.slice().reverse()) {
         const idx = newOrder.indexOf(id);
         if (idx >= 0 && idx < newOrder.length - 1) {
           // Swap with next.
@@ -433,8 +434,8 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
     }
     case 'backward': {
       // Move each selected node down one position (if not already at bottom).
-      // Process in reverse to avoid affecting indices of earlier nodes.
-      for (const id of uniqueIds.slice().reverse()) {
+      // Process in normal order to avoid swapping selected nodes with each other.
+      for (const id of uniqueIds) {
         const idx = newOrder.indexOf(id);
         if (idx > 0) {
           const prev = newOrder[idx - 1]!;

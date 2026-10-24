@@ -8,6 +8,19 @@
 import type { Doc } from '../core/types';
 import { deserializeDoc, serializeDoc, type FileEnvelope } from '../core/serialize';
 
+interface WindowFileAccessAPI {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<FileSystemFileHandle>;
+  showOpenFilePicker?: (options: {
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<FileSystemFileHandle[]>;
+}
+
+const fsWindow = window as unknown as WindowFileAccessAPI;
+
+
 /** Result of a file import. */
 export interface ImportResult {
   envelope: FileEnvelope;
@@ -61,7 +74,7 @@ export function pickFile(): Promise<File | null> {
 
 /** Check if the browser supports the File System Access API (optional enhancement). */
 export function supportsFileSystemAccess(): boolean {
-  return 'showSaveFilePicker' in window && 'showOpenFilePicker' in window;
+  return !!fsWindow.showSaveFilePicker && !!fsWindow.showOpenFilePicker;
 }
 
 /** Modern export using File System Access API (when available). */
@@ -71,7 +84,7 @@ export async function exportFileModern(doc: Doc, view?: { x: number; y: number; 
     return;
   }
   try {
-    const handle = await (window as unknown as { showSaveFilePicker: (options: { suggestedName: string; types: Array<{ description: string; accept: Record<string, string[]> }> }) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
+    const handle = await fsWindow.showSaveFilePicker!({
       suggestedName: `vexboard-${Date.now()}.vexboard`,
       types: [{ description: 'VexBoard files', accept: { 'application/json': ['.vexboard'] } }],
     });
@@ -92,7 +105,7 @@ export async function importFileModern(): Promise<ImportResult | null> {
     return file ? importFile(file) : null;
   }
   try {
-    const handles = await (window as unknown as { showOpenFilePicker: (options: { types: Array<{ description: string; accept: Record<string, string[]> }> }) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker({
+    const handles = await fsWindow.showOpenFilePicker!({
       types: [{ description: 'VexBoard files', accept: { 'application/json': ['.vexboard'] } }],
     });
     const handle = handles[0];
