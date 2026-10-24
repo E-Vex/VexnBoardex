@@ -7,6 +7,7 @@
 // Camera, document and UI changes flow through their stores, each triggering
 // a re-render and a HUD update.
 import './style.css';
+import type { Node, Edge, Doc } from './core/types';
 import { emptyDoc } from './core/doc';
 import { createDocStore } from './core/store';
 import { attachCameraInput } from './input/cameraInput';
@@ -149,18 +150,18 @@ const autosaver = createAutosaver();
 
 // Subscribe to document changes → autosave.
 docStore.subscribe((doc) => {
-  autosaver(doc, store.get());
+  autosaver.update(doc, store.get());
 });
 
 // Subscribe to camera changes → autosave (view).
 store.subscribe((cam) => {
-  autosaver(docStore.get(), cam);
+  autosaver.update(docStore.get(), cam);
 });
 
 // --- Clipboard for copy/paste (T-016) ---
 interface ClipboardData {
-  nodes: { id: string; [key: string]: unknown }[];
-  edges: { id: string; [key: string]: unknown }[];
+  nodes: Node[];
+  edges: Edge[];
 }
 let clipboard: ClipboardData | null = null;
 
@@ -227,57 +228,48 @@ function copySelection(): void {
   const selection = uiStore.get().selection;
   if (selection.length === 0) return;
   const doc = docStore.get();
-  const nodes = selection.map((id) => {
-    const node = doc.nodes[id];
-    if (!node) return null;
-    return { ...node, id: node.id } as { id: string; [key: string]: unknown };
-  }).filter((n): n is { id: string; [key: string]: unknown } => n !== null);
+  const nodes = selection
+    .map((id) => doc.nodes[id])
+    .filter((n): n is Node => !!n)
+    .map((n) => ({ ...n }));
   // Include edges between selected nodes.
-  const edges: { id: string; [key: string]: unknown }[] = [];
+  const edges = getSelectedEdges(doc, selection).map((e) => ({ ...e }));
+  clipboard = { nodes, edges };
+}
+
+function getSelectedEdges(doc: Doc, selection: string[]): Edge[] {
+  const edges: Edge[] = [];
   for (const [, edge] of Object.entries(doc.edges)) {
     if (selection.includes(edge.from.node) && selection.includes(edge.to.node)) {
-      edges.push({ ...edge });
+      edges.push(edge);
     }
   }
-  clipboard = { nodes, edges };
+  return edges;
+}
+
+function duplicateNodes(ids: string[]): void {
+  if (ids.length === 0) return;
+  const newIds = ids.map(() => crypto.randomUUID());
+  const doc = docStore.get();
+  const edgeCount = getSelectedEdges(doc, ids).length;
+  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
+  docStore.dispatch({
+    type: 'node.duplicate',
+    ids,
+    offsetX: 20,
+    offsetY: 20,
+    newIds,
+    newEdgeIds,
+  });
 }
 
 function pasteSelection(): void {
   if (!clipboard || clipboard.nodes.length === 0) return;
-  const newIds = clipboard.nodes.map(() => crypto.randomUUID());
-  const edgeCount = clipboard.edges.length;
-  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
-  docStore.dispatch({
-    type: 'node.duplicate',
-    ids: clipboard.nodes.map((n) => n.id),
-    offsetX: 20,
-    offsetY: 20,
-    newIds,
-    newEdgeIds,
-  });
+  duplicateNodes(clipboard.nodes.map((n) => n.id));
 }
 
 function duplicateSelection(): void {
-  const selection = uiStore.get().selection;
-  if (selection.length === 0) return;
-  const newIds = selection.map(() => crypto.randomUUID());
-  // Count edges between selected nodes.
-  const doc = docStore.get();
-  let edgeCount = 0;
-  for (const [, edge] of Object.entries(doc.edges)) {
-    if (selection.includes(edge.from.node) && selection.includes(edge.to.node)) {
-      edgeCount++;
-    }
-  }
-  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
-  docStore.dispatch({
-    type: 'node.duplicate',
-    ids: selection,
-    offsetX: 20,
-    offsetY: 20,
-    newIds,
-    newEdgeIds,
-  });
+  duplicateNodes(uiStore.get().selection);
 }
 
 function selectAll(): void {
@@ -315,53 +307,53 @@ function createToolbar(): void {
     flex-wrap: wrap;
   `;
 
-  const makeBtn = (text: string, onClick: () => void, disabled = false) => {
+  type ButtonConfig = {
+    text: string;
+    onClick: () => void;
+    isDisabled?: () => boolean;
+  };
+
+  const buttons: { element: HTMLButtonElement; config: ButtonConfig }[] = [];
+
+  const makeBtn = (config: ButtonConfig) => {
     const btn = document.createElement('button');
-    btn.textContent = text;
+    btn.textContent = config.text;
     btn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
-    btn.disabled = disabled;
-    btn.onclick = onClick;
-    return btn;
+    btn.disabled = config.isDisabled ? config.isDisabled() : false;
+    btn.onclick = config.onClick;
+    buttons.push({ element: btn, config });
+    toolbar.appendChild(btn);
   };
 
-  toolbar.appendChild(makeBtn('↶ Undo', () => docStore.undo(), !docStore.canUndo()));
-  toolbar.appendChild(makeBtn('↷ Redo', () => docStore.redo(), !docStore.canRedo()));
-  toolbar.appendChild(makeBtn('Copy', copySelection, uiStore.get().selection.length === 0));
-  toolbar.appendChild(makeBtn('Paste', pasteSelection, !clipboard || clipboard.nodes.length === 0));
-  toolbar.appendChild(makeBtn('Duplicate', duplicateSelection, uiStore.get().selection.length === 0));
-  toolbar.appendChild(makeBtn('Select All', selectAll, docStore.get().order.length === 0));
-  toolbar.appendChild(makeBtn('Front', bringToFront, uiStore.get().selection.length === 0));
-  toolbar.appendChild(makeBtn('Back', sendToBack, uiStore.get().selection.length === 0));
-  toolbar.appendChild(makeBtn('Export', () => exportFile(docStore.get(), store.get())));
-  toolbar.appendChild(makeBtn('Import', async () => {
-    const file = await pickFile();
-    if (file) {
-      const result = await importFile(file);
-      console.log('[import]', result);
-      for (const w of result.warnings) console.warn('[import]', w);
-    }
-  }));
+  makeBtn({ text: '↶ Undo', onClick: () => docStore.undo(), isDisabled: () => !docStore.canUndo() });
+  makeBtn({ text: '↷ Redo', onClick: () => docStore.redo(), isDisabled: () => !docStore.canRedo() });
+  makeBtn({ text: 'Copy', onClick: copySelection, isDisabled: () => uiStore.get().selection.length === 0 });
+  makeBtn({ text: 'Paste', onClick: pasteSelection, isDisabled: () => !clipboard || clipboard.nodes.length === 0 });
+  makeBtn({ text: 'Duplicate', onClick: duplicateSelection, isDisabled: () => uiStore.get().selection.length === 0 });
+  makeBtn({ text: 'Select All', onClick: selectAll, isDisabled: () => docStore.get().order.length === 0 });
+  makeBtn({ text: 'Front', onClick: bringToFront, isDisabled: () => uiStore.get().selection.length === 0 });
+  makeBtn({ text: 'Back', onClick: sendToBack, isDisabled: () => uiStore.get().selection.length === 0 });
+  makeBtn({ text: 'Export', onClick: () => exportFile(docStore.get(), store.get()) });
+  makeBtn({
+    text: 'Import',
+    onClick: async () => {
+      const file = await pickFile();
+      if (file) {
+        const result = await importFile(file);
+        console.log('[import]', result);
+        for (const w of result.warnings) console.warn('[import]', w);
+      }
+    },
+  });
 
-  // Update button states on doc/selection changes.
   const updateToolbar = () => {
-    const sel = uiStore.get().selection;
-    const canUndo = docStore.canUndo();
-    const canRedo = docStore.canRedo();
-    const hasSel = sel.length > 0;
-    const hasClipboard = !!clipboard && clipboard.nodes.length > 0;
-    const hasNodes = docStore.get().order.length > 0;
-    toolbar.querySelectorAll('button').forEach((btn, i) => {
-      // Buttons in order: Undo, Redo, Copy, Paste, Duplicate, Select All, Front, Back, Export, Import
-      if (i === 0) btn.disabled = !canUndo;
-      else if (i === 1) btn.disabled = !canRedo;
-      else if (i === 2) btn.disabled = !hasSel;
-      else if (i === 3) btn.disabled = !hasClipboard;
-      else if (i === 4) btn.disabled = !hasSel;
-      else if (i === 5) btn.disabled = !hasNodes;
-      else if (i === 6) btn.disabled = !hasSel;
-      else if (i === 7) btn.disabled = !hasSel;
-    });
+    for (const { element, config } of buttons) {
+      if (config.isDisabled) {
+        element.disabled = config.isDisabled();
+      }
+    }
   };
+
   docStore.subscribe(updateToolbar);
   uiStore.subscribe(updateToolbar);
 
