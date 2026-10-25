@@ -83,13 +83,16 @@ describe('selectTool — pointerDown (D-26)', () => {
   it('a left press on empty space clears the selection and starts box-select', () => {
     const r = run(initialSelectState(), down(p(10, 10), p(-5, -5), null), SEL_A);
     expect(r.state.mode).toBe('boxSelecting');
+    expect(r.state.pointerId).toBe(1);
     expect(r.effects).toEqual([{ type: 'select', ids: [] }, { type: 'setBoxSelect', rect: { x: 10, y: 10, w: 0, h: 0 } }]);
   });
 
-  it('a left press on empty space with an empty selection emits nothing', () => {
+  it('T-017: a left press on empty space with an empty selection also starts box-select', () => {
     const r = run(initialSelectState(), down(p(10, 10), p(-5, -5), null), NO_SELECTION);
-    expect(r.state.mode).toBe('idle');
-    expect(r.effects).toEqual([]);
+    expect(r.state.mode).toBe('boxSelecting');
+    expect(r.state.pointerId).toBe(1);
+    // No select effect: the selection is already empty.
+    expect(r.effects).toEqual([{ type: 'setBoxSelect', rect: { x: 10, y: 10, w: 0, h: 0 } }]);
   });
 
   it('a button other than 0 is ignored', () => {
@@ -390,5 +393,141 @@ describe('selectTool — irrelevant events (R4)', () => {
     const r = run(initialSelectState(), { type: 'blur' }, SEL_A);
     expect(r.state.mode).toBe('idle');
     expect(r.effects).toEqual([]);
+  });
+});
+
+describe('selectTool — box-select lifecycle (T-017)', () => {
+  /** A box-selecting state started at screen (100, 100). */
+  function boxSelecting(): SelectState {
+    return run(
+      initialSelectState(),
+      down(p(100, 100), p(0, 0), null),
+      NO_SELECTION,
+    ).state;
+  }
+
+  it('the boxSelecting state remembers the pointerId (regression: stuck machine)', () => {
+    const st = boxSelecting();
+    expect(st.mode).toBe('boxSelecting');
+    expect(st.pointerId).toBe(1);
+  });
+
+  it('pointer-up after a marquee emits the final rect as selectInRect', () => {
+    let st = boxSelecting();
+    st = run(st, move(p(200, 180), p(100, 80)), NO_SELECTION).state;
+    const r = run(st, up(p(200, 180), p(100, 80)), NO_SELECTION);
+    expect(r.state.mode).toBe('idle');
+    expect(r.effects).toEqual([
+      { type: 'setBoxSelect', rect: null },
+      { type: 'selectInRect', rect: { x: 100, y: 100, w: 100, h: 80 } },
+    ]);
+  });
+
+  it('a marquee dragged up-left normalises the rect', () => {
+    const st = run(
+      initialSelectState(),
+      down(p(200, 180), p(100, 80), null),
+      NO_SELECTION,
+    ).state;
+    const r = run(st, up(p(100, 100), p(0, 0)), NO_SELECTION);
+    expect(ofType(r.effects, 'selectInRect')).toEqual([
+      { type: 'selectInRect', rect: { x: 100, y: 100, w: 100, h: 80 } },
+    ]);
+  });
+
+  it('a click-sized marquee (no move) still emits selectInRect with a zero rect', () => {
+    const st = boxSelecting();
+    const r = run(st, up(p(100, 100), p(0, 0)), NO_SELECTION);
+    expect(ofType(r.effects, 'selectInRect')).toEqual([
+      { type: 'selectInRect', rect: { x: 100, y: 100, w: 0, h: 0 } },
+    ]);
+  });
+
+  it('pointer-up for another pointer does not end the marquee (regression)', () => {
+    const st = boxSelecting();
+    const r = run(st, up(p(500, 500), p(400, 400), 9), NO_SELECTION);
+    expect(r.state.mode).toBe('boxSelecting');
+    expect(r.effects).toEqual([]);
+  });
+
+  it('Escape during a marquee cancels it without selecting', () => {
+    const st = boxSelecting();
+    const moved = run(st, move(p(200, 180), p(100, 80)), NO_SELECTION);
+    const r = run(moved.state, keyEvent('Escape'), NO_SELECTION);
+    expect(r.state.mode).toBe('idle');
+    expect(r.effects).toEqual([{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]);
+  });
+});
+
+describe('selectTool — group move (T-017)', () => {
+  const SEL_AB: SelectCtx = { selection: ['a', 'b'] };
+
+  /** A pressed state on node 'b' while ['a','b'] is selected. */
+  function pressedOnBInAB(): SelectState {
+    return run(
+      initialSelectState(),
+      down(p(300, 230), p(-340, -130), 'b'),
+      SEL_AB,
+    ).state;
+  }
+
+  it('pressing an already-selected node drags the whole selection', () => {
+    const st = pressedOnBInAB();
+    expect(st.dragIds).toEqual(['a', 'b']);
+    // No select effect: the selection is unchanged.
+  });
+
+  it('the drag preview moves every selected id', () => {
+    const st = pressedOnBInAB();
+    const r = run(st, move(p(300, 330), p(-340, -30)), SEL_AB);
+    expect(r.effects).toEqual([
+      { type: 'setDrag', drag: { ids: ['a', 'b'], dx: 0, dy: 100 } },
+    ]);
+  });
+
+  it('pointer-up commits ONE node.move for every selected id', () => {
+    let st = pressedOnBInAB();
+    st = run(st, move(p(300, 330), p(-340, -30)), SEL_AB).state;
+    const r = run(st, up(p(300, 330), p(-340, -30)), SEL_AB);
+    expect(ofType(r.effects, 'dispatch')).toEqual([
+      {
+        type: 'dispatch',
+        command: { type: 'node.move', ids: ['a', 'b'], dx: 0, dy: 100 },
+      },
+    ]);
+  });
+
+  it('pressing an unselected node drags only it', () => {
+    const st = run(
+      initialSelectState(),
+      down(p(10, 10), p(0, 0), 'c'),
+      SEL_AB,
+    ).state;
+    expect(st.dragIds).toEqual(['c']);
+  });
+
+  it('shift-toggle off then drag drags only the pressed node', () => {
+    // Selection [a, b], shift-click b → toggles b off → [a]. Dragging b now
+    // moves b alone.
+    const st = run(
+      initialSelectState(),
+      down(p(300, 230), p(-340, -130), 'b', 1, 0, true),
+      SEL_AB,
+    ).state;
+    expect(st.dragIds).toEqual(['b']);
+    const r = run(st, move(p(300, 330), p(-340, -30)), { selection: ['a'] });
+    expect(ofType(r.effects, 'setDrag')).toEqual([
+      { type: 'setDrag', drag: { ids: ['b'], dx: 0, dy: 100 } },
+    ]);
+  });
+
+  it('shift-toggle on adds to the selection and drags all of it', () => {
+    // Selection [a], shift-click b → [a, b]. Dragging b moves both.
+    const st = run(
+      initialSelectState(),
+      down(p(300, 230), p(-340, -130), 'b', 1, 0, true),
+      { selection: ['a'] },
+    ).state;
+    expect(st.dragIds).toEqual(['a', 'b']);
   });
 });

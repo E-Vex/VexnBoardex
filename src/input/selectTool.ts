@@ -4,9 +4,14 @@
  * Implements D-26 (drag rules) and D-27 (delete) exactly:
  *
  * - A left press (button 0) on a node selects it (if not already selected)
- *   and starts a possible drag. A left press on empty space clears the
- *   selection. Space+left and the middle button never reach this machine —
- *   they belong to panning (the DOM glue checks `isPanActive`).
+ *   and starts a possible drag. When the pressed node belongs to the current
+ *   selection, the whole selection drags together (T-017: group move).
+ * - A left press on empty space starts a box-select (marquee), whether or
+ *   not anything is selected (T-017: a fresh board can marquee too). A
+ *   click-sized marquee selects nothing, so a plain click on empty space
+ *   still clears the selection.
+ *   Space+left and the middle button never reach this machine — they
+ *   belong to panning (the DOM glue checks `isPanActive`).
  * - The drag begins only after the pointer travels at least
  *   `DRAG_THRESHOLD` screen pixels (Euclidean) from the press point.
  * - While dragging, only `setDrag` effects are produced (I-04: pointer-move
@@ -14,6 +19,8 @@
  * - Pointer-up after a drag dispatches exactly ONE `node.move` whose `dx`,
  *   `dy` are world deltas `worldPos(now) − worldPos(press)` — so zoom and
  *   mid-drag camera changes stay correct.
+ * - Pointer-up at the end of a box-select emits `selectInRect` (the final
+ *   screen-space rect); the DOM glue resolves it against the document.
  * - Under the threshold, pointer-up is a click: no command.
  * - `Escape`, `pointercancel` and `blur` cancel a gesture with no command.
  * - `Delete`/`Backspace` (idle only, selection non-empty) dispatch one
@@ -39,7 +46,7 @@ export const NUDGE_DISTANCE = 10;
 
 export type SelectMode = 'idle' | 'pressed' | 'dragging' | 'boxSelecting';
 
-/** The machine state (R4): `startScreen`/`startWorld` are the press point. */
+/** The state machine state (R4): `startScreen`/`startWorld` are the press point. */
 export interface SelectState {
   mode: SelectMode;
   pointerId: number | null;
@@ -48,6 +55,8 @@ export interface SelectState {
   hitId: Id | null;
   /** For box-select: the screen rect of the marquee. */
   boxSelectRect: { x: number; y: number; w: number; h: number } | null;
+  /** The ids that move together during a drag (T-017: group move). */
+  dragIds: Id[];
 }
 
 /** Events fed into the machine (R4). */
@@ -72,7 +81,12 @@ export type SelectEffect =
   | { type: 'select'; ids: Id[] }
   | { type: 'setDrag'; drag: DragPreview | null }
   | { type: 'dispatch'; command: Command }
-  | { type: 'setBoxSelect'; rect: { x: number; y: number; w: number; h: number } | null };
+  | { type: 'setBoxSelect'; rect: { x: number; y: number; w: number; h: number } | null }
+  | {
+      /** Select every node intersecting this screen-space rect (T-017). */
+      type: 'selectInRect';
+      rect: { x: number; y: number; w: number; h: number };
+    };
 
 /** Per-event context: the current selection (read from the UI store). */
 export interface SelectCtx {
@@ -93,6 +107,20 @@ export function initialSelectState(): SelectState {
     startWorld: null,
     hitId: null,
     boxSelectRect: null,
+    dragIds: [],
+  };
+}
+
+/** The marquee rect spanned by two screen points, normalised to positive w/h. */
+function marqueeRect(
+  a: Point,
+  b: Point,
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
   };
 }
 
@@ -107,11 +135,10 @@ function worldDelta(state: SelectState, world: Point): { dx: number; dy: number 
   return { dx: world.x - start.x, dy: world.y - start.y };
 }
 
-/** The drag preview for the selected nodes at `world` (D-26). */
+/** The drag preview for the dragged nodes at `world` (D-26, T-017). */
 function dragPreview(state: SelectState, world: Point): DragPreview {
   const { dx, dy } = worldDelta(state, world);
-  // For now, we only drag the hitId node. Multi-node drag is handled by selectInput.
-  return { ids: [state.hitId!], dx, dy };
+  return { ids: state.dragIds, dx, dy };
 }
 
 /** The idle state after a gesture ends. */
@@ -138,17 +165,26 @@ export function reduce(
 
       if (event.hitId !== null) {
         // Press on a node: shift+click toggles, otherwise select (or keep selected)
-        // and start a possible drag (D-26).
+        // and start a possible drag (D-26). When the pressed node belongs to
+        // the selection, the whole selection drags together (T-017).
         const effects: SelectEffect[] = [];
+        let dragIds: Id[];
         if (event.shiftKey) {
           // Toggle selection
           const newSelection = ctx.selection.includes(event.hitId)
             ? ctx.selection.filter((id) => id !== event.hitId)
             : [...ctx.selection, event.hitId];
           effects.push({ type: 'select', ids: newSelection });
-        } else if (!ctx.selection.includes(event.hitId)) {
+          // The toggle has taken effect: drag what the selection will be.
+          dragIds = newSelection.includes(event.hitId)
+            ? newSelection
+            : [event.hitId];
+        } else if (ctx.selection.includes(event.hitId)) {
+          dragIds = [...ctx.selection];
+        } else {
           // Select only this node (replacing selection)
           effects.push({ type: 'select', ids: [event.hitId] });
+          dragIds = [event.hitId];
         }
         return {
           state: {
@@ -158,23 +194,31 @@ export function reduce(
             startWorld: event.world,
             hitId: event.hitId,
             boxSelectRect: null,
+            dragIds,
           },
           effects,
         };
       }
 
-      // Press on empty space: start box-select if shift is not held,
-      // otherwise clear selection.
-      if (!event.shiftKey && ctx.selection.length > 0) {
-        return {
-          state: { ...initialSelectState(), mode: 'boxSelecting', boxSelectRect: { x: event.screen.x, y: event.screen.y, w: 0, h: 0 } },
-          effects: [{ type: 'select', ids: [] }, { type: 'setBoxSelect', rect: { x: event.screen.x, y: event.screen.y, w: 0, h: 0 } }],
-        };
-      }
-      if (ctx.selection.length > 0) {
-        return { state: idle(), effects: [{ type: 'select', ids: [] }] };
-      }
-      return { state: idle(), effects: [] };
+      // Press on empty space: start a box-select marquee (T-017: always,
+      // whether or not anything is selected). The selection is cleared up
+      // front when non-empty; the marquee's pointer-up then selects whatever
+      // intersects the rect (nothing for a click-sized rect).
+      const effects: SelectEffect[] =
+        ctx.selection.length > 0 ? [{ type: 'select', ids: [] }] : [];
+      const rect = marqueeRect(event.screen, event.screen);
+      return {
+        state: {
+          ...initialSelectState(),
+          mode: 'boxSelecting',
+          pointerId: event.pointerId,
+          startScreen: event.screen,
+          startWorld: event.world,
+          boxSelectRect: rect,
+          dragIds: [],
+        },
+        effects: [...effects, { type: 'setBoxSelect', rect }],
+      };
     }
 
     case 'pointerMove': {
@@ -220,16 +264,21 @@ export function reduce(
       }
 
       if (state.mode === 'boxSelecting') {
-        // Finalize box-select: the actual hit-testing is done in selectInput
-        // using the final rect. We just clear the box-select preview.
+        // Finalize the box-select: emit the final marquee rect; the DOM glue
+        // resolves it against the document and sets the selection (T-017).
+        const rect = marqueeRect(state.startScreen!, event.screen);
         return {
           state: idle(),
-          effects: [{ type: 'setBoxSelect', rect: null }],
+          effects: [
+            { type: 'setBoxSelect', rect: null },
+            { type: 'selectInRect', rect },
+          ],
         };
       }
 
       // After a drag: clear the preview, then commit exactly one node.move
-      // with world deltas (D-26, I-04).
+      // with world deltas (D-26, I-04). Every dragged id moves together
+      // (T-017: group move).
       const { dx, dy } = worldDelta(state, event.world);
       return {
         state: idle(),
@@ -237,7 +286,7 @@ export function reduce(
           { type: 'setDrag', drag: null },
           {
             type: 'dispatch',
-            command: { type: 'node.move', ids: [state.hitId!], dx, dy },
+            command: { type: 'node.move', ids: [...state.dragIds], dx, dy },
           },
         ],
       };
