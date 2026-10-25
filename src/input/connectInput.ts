@@ -48,8 +48,6 @@ export interface ConnectInput {
 export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
   const { canvas, cameraStore, docStore, uiStore, isPanActive } = opts;
 
-  let state: ConnectState = initialConnectState();
-
   /** Apply the machine's effects to the UI and doc stores (R3). */
   function applyEffects(effects: ConnectEffect[]): void {
     for (const effect of effects) {
@@ -78,11 +76,41 @@ export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
     return { doc: docStore.get() };
   }
 
+  let state: ConnectState = initialConnectState();
+  let capturedPointerId: number | null = null;
+
+  /**
+   * Hold pointer capture exactly while a connect gesture is active (T-020):
+   * drags that cross the text-editor overlay (or leave the canvas) must keep
+   * feeding the machine — without capture, the DOM element under the
+   * pointer steals the moves and the gesture dies mid-drag.
+   */
+  function syncPointerCapture(): void {
+    const gesturePointer = state.mode !== 'idle' ? state.pointerId : null;
+    if (gesturePointer !== null && capturedPointerId === null) {
+      try {
+        canvas.setPointerCapture(gesturePointer);
+        capturedPointerId = gesturePointer;
+      } catch {
+        // The pointer may already be gone; the gesture still works while
+        // the pointer stays over the canvas.
+      }
+    } else if (gesturePointer === null && capturedPointerId !== null) {
+      try {
+        canvas.releasePointerCapture(capturedPointerId);
+      } catch {
+        // Capture may already be released.
+      }
+      capturedPointerId = null;
+    }
+  }
+
   /** Feed one event, apply its effects. */
   function feed(event: ConnectEvent): void {
     const result = reduceConnect(state, event, currentCtx());
     state = result.state;
     applyEffects(result.effects);
+    syncPointerCapture();
   }
 
   /** Screen (CSS px, canvas-relative) and world position of an event. */
@@ -144,20 +172,28 @@ export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
     feed({ type: 'blur' });
   }
 
-  canvas.addEventListener('pointerdown', onPointerDown);
-  canvas.addEventListener('pointermove', onPointerMove);
-  canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', onPointerCancel);
-  window.addEventListener('blur', onBlur);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('blur', onBlur);
 
-  return {
-    detach() {
-      canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', onPointerUp);
-      canvas.removeEventListener('pointercancel', onPointerCancel);
-      window.removeEventListener('blur', onBlur);
-      state = initialConnectState();
-    },
-  };
+    return {
+      detach() {
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        canvas.removeEventListener('pointermove', onPointerMove);
+        canvas.removeEventListener('pointerup', onPointerUp);
+        canvas.removeEventListener('pointercancel', onPointerCancel);
+        window.removeEventListener('blur', onBlur);
+        if (capturedPointerId !== null) {
+          try {
+            canvas.releasePointerCapture(capturedPointerId);
+          } catch {
+            // Ignore.
+          }
+          capturedPointerId = null;
+        }
+        state = initialConnectState();
+      },
+    };
 }
