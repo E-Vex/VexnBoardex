@@ -27,6 +27,14 @@ export interface DocStore {
    * unchanged and nobody is notified (atomic).
    */
   dispatch(command: Command): Patch;
+  /**
+   * Replace the whole document (T-018: file import, autosave restore, new
+   * board). Validates the replacement, wipes undo/redo history, bumps the
+   * revision and notifies subscribers with an empty patch. UI state (e.g. the
+   * selection) is the caller's business. Throws when `doc` is invalid (the
+   * current document is then unchanged).
+   */
+  replace(doc: Doc): void;
   /** Subscribe to document changes: `fn(doc, patch)` in subscription order. */
   subscribe(fn: (doc: Doc, patch: Patch) => void): () => void;
   /** Undo the last command. Returns the inverse patch applied, or null. */
@@ -138,6 +146,21 @@ export function createDocStore(initial: Doc, options: { now: () => number }): Do
     history.clear();
   }
 
+  function replace(next: Doc): void {
+    const violations = validateDoc(next);
+    if (violations.length > 0) {
+      throw new Error(
+        `replace: document is invalid:\n${violations.join('\n')}`,
+      );
+    }
+    current = next;
+    revision += 1;
+    history.clear();
+    for (const fn of subscribers) {
+      fn(current, { nodes: {}, edges: {}, groups: {} });
+    }
+  }
+
   return {
     get() {
       return current;
@@ -160,5 +183,6 @@ export function createDocStore(initial: Doc, options: { now: () => number }): Do
     getRedoSize,
     transaction,
     clearHistory,
+    replace,
   };
 }

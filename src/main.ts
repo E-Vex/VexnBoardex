@@ -1,11 +1,11 @@
-// VexBoard entry point (T-005 / T-007 R10 / T-008 R7 / T-011 R4 / T-013 R1):
-// wires the camera store, the doc store, the UI store (selection + drag
-// preview, D-25), the board renderer, the cursor tracker, the HUD, camera
-// input (pan/zoom), node input (double-click creates a card, selects it),
-// select input (select, move, delete), connect input (drag from handle to
-// create edge), and IO (autosave, file export/import).
-// Camera, document and UI changes flow through their stores, each triggering
-// a re-render and a HUD update.
+// VexBoard entry point (T-005 / T-007 R10 / T-008 R7 / T-011 R4 / T-013 R1 / T-018):
+// wires the camera store, the doc store, the UI store (selection + drag /
+// connect previews, D-25), the board renderer, the cursor tracker, the HUD,
+// camera input (pan/zoom), node input (double-click creates a card, selects
+// it), select input (select, move, delete), connect input (drag from handle
+// to create edge), and IO (autosave with startup restore, file
+// export/import). Camera, document and UI changes flow through their
+// stores, each triggering a re-render and a HUD update.
 import './style.css';
 import type { Node, Edge, Doc } from './core/types';
 import { emptyDoc } from './core/doc';
@@ -21,7 +21,7 @@ import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
 import { createUiStore, pruneSelection } from './view/uiStore';
-import { createAutosaver } from './io/autosave';
+import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import { exportFile, importFile, pickFile } from './io/file';
 
 // Initial camera: world (0, 0) centered in the viewport at zoom 1 (R6).
@@ -144,9 +144,37 @@ const connectInput = attachConnectInput({
   isPanActive: () => input.isPanning() || input.isSpaceHeld(),
 });
 
-// --- Autosave (T-013) ---
+// --- Autosave (T-013, T-018) ---
 // Create autosaver that saves on every doc/view change.
 const autosaver = createAutosaver();
+
+// Restore the last autosaved session on startup (T-018: reload keeps your
+// work — M4's "save → reload → deep-equal document" promise, in-app).
+// Runs after the first paint; subscribers refresh the HUD and canvas.
+void (async () => {
+  try {
+    const saved = await loadAutosave();
+    if (saved) {
+      docStore.replace(saved.envelope.doc);
+      uiStore.setSelection([]);
+      if (saved.envelope.view) {
+        store.set({
+          x: saved.envelope.view.x,
+          y: saved.envelope.view.y,
+          zoom: saved.envelope.view.zoom,
+        });
+      }
+      for (const w of saved.warnings) console.warn('[restore]', w);
+    }
+  } catch (e) {
+    console.warn('[restore] autosave unavailable:', e);
+  }
+})();
+
+// Flush pending autosaves when the page goes away (debounce would lose them).
+window.addEventListener('pagehide', () => {
+  void autosaver.flush();
+});
 
 // Subscribe to document changes → autosave.
 docStore.subscribe((doc) => {
@@ -339,10 +367,33 @@ function createToolbar(): void {
     onClick: async () => {
       const file = await pickFile();
       if (file) {
-        const result = await importFile(file);
-        console.log('[import]', result);
-        for (const w of result.warnings) console.warn('[import]', w);
+        try {
+          const result = await importFile(file);
+          // T-018: the imported document actually replaces the current one.
+          docStore.replace(result.envelope.doc);
+          uiStore.setSelection([]);
+          if (result.envelope.view) {
+            store.set({
+              x: result.envelope.view.x,
+              y: result.envelope.view.y,
+              zoom: result.envelope.view.zoom,
+            });
+          }
+          for (const w of result.warnings) console.warn('[import]', w);
+        } catch (e) {
+          console.error('[import] failed:', e);
+        }
       }
+    },
+  });
+  makeBtn({
+    // T-018: New board — replaces the document and clears the autosave so a
+    // reload does not resurrect the old board.
+    text: 'New',
+    onClick: () => {
+      docStore.replace(emptyDoc());
+      uiStore.setSelection([]);
+      void clearAutosave();
     },
   });
 

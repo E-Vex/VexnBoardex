@@ -232,3 +232,47 @@ describe('getRevision — doc store revision counter (T-008 R2)', () => {
     expect(store.getRevision()).toBe(1);
   });
 });
+
+describe('store.replace (T-018)', () => {
+  it('replaces the document, bumps the revision and notifies subscribers', () => {
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
+    const seen: Doc[] = [];
+    store.subscribe((doc) => seen.push(doc));
+
+    const next = validDoc();
+    next.nodes['n1']!.x = 500;
+    next.nodes['n2'] = { ...next.nodes['n1']!, id: 'n2', x: 0, y: 0 };
+    next.order = ['n1', 'n2'];
+    store.replace(next);
+
+    expect(store.get()).toBe(next);
+    expect(store.getRevision()).toBe(1);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(next);
+  });
+
+  it('clears undo/redo history', () => {
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
+    store.dispatch({ type: 'node.move', ids: ['n1'], dx: 10, dy: 0 });
+    expect(store.canUndo()).toBe(true);
+
+    const next = validDoc();
+    next.nodes['n2'] = { ...next.nodes['n1']!, id: 'n2', x: 0, y: 0 };
+    next.order = ['n1', 'n2'];
+    store.replace(next);
+
+    expect(store.canUndo()).toBe(false);
+    expect(store.canRedo()).toBe(false);
+    expect(store.undo()).toBeNull();
+  });
+
+  it('throws on an invalid replacement and keeps the current document', () => {
+    const store = createDocStore(validDoc(), { now: () => Date.now() });
+    const before = store.get();
+    const bad = validDoc();
+    bad.order = ['n1', 'ghost']; // order lists a node that does not exist
+    expect(() => store.replace(bad)).toThrow(/invalid/);
+    expect(store.get()).toBe(before);
+    expect(store.canUndo()).toBe(false);
+  });
+});
