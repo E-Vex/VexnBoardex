@@ -316,4 +316,81 @@ test.describe('select @ 1280×720', () => {
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
     await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
   });
+
+  test('10. box-select: a marquee selects every node it covers (T-017)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    // Card A at (300, 200) — screen rect 200–400, 140–260…
+    await page.mouse.dblclick(300, 200);
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    // …card B at (700, 450) — screen rect 600–800, 390–510.
+    await page.mouse.dblclick(700, 450);
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+
+    // Marquee from (150, 100) to (850, 550): covers both cards.
+    await page.mouse.move(150, 100);
+    await page.mouse.down();
+    await page.mouse.move(400, 300);
+    await page.mouse.move(850, 550);
+    await page.mouse.up();
+
+    // Both cards are selected; the document is untouched (no rev change).
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 2');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
+
+    // A marquee over empty space clears the selection again.
+    await page.mouse.move(900, 620);
+    await page.mouse.down();
+    await page.mouse.move(950, 660);
+    await page.mouse.up();
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 0');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+  });
+
+  test('11. group move: dragging one selected node moves both (one command)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createCard(page); // A at (300, 200), selected
+    await page.mouse.dblclick(700, 450); // B at (700, 450)
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
+    // Determine B's fill color from its interior point (700, 480).
+    const bg = await dominantColor(page);
+    let fill: Rgba | null = null;
+    await expect
+      .poll(async () => {
+        const p = await canvasPixel(page, 700, 480);
+        if (!sameColor(p, bg)) fill = p;
+        return sameColor(p, bg);
+      })
+      .toBe(false);
+
+    // Marquee over both cards.
+    await page.mouse.move(150, 100);
+    await page.mouse.down();
+    await page.mouse.move(850, 550);
+    await page.mouse.up();
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 2');
+
+    // Drag A down by 100 px: B must move too, in the same single command.
+    await page.mouse.move(300, 230);
+    await page.mouse.down();
+    await page.mouse.move(300, 330);
+    await page.mouse.up();
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+
+    // A moved: fill at (300, 330), vacated at (300, 230).
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 300, 330), fill!))
+      .toBe(true);
+    expect(sameColor(await canvasPixel(page, 300, 230), fill!)).toBe(false);
+    // B moved with it: fill at (700, 550), vacated at (700, 450).
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 700, 550), fill!))
+      .toBe(true);
+    expect(sameColor(await canvasPixel(page, 700, 450), fill!)).toBe(false);
+  });
 });
