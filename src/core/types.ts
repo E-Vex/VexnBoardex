@@ -27,6 +27,9 @@ export interface Node {
   color: string;
   tags: string[];
   groupId?: Id;
+  /** For image nodes: the image source — a data URL (T-023). Optional so
+   * older files (and non-image kinds) stay valid without it. */
+  src?: string;
 }
 
 /** One endpoint of an edge, referencing a node by id (I-01). */

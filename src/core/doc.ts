@@ -30,6 +30,7 @@ export function emptyDoc(): Doc {
  *   the reverse direction is allowed.
  * - `group-dangling:` — a node's `groupId` references a missing group.
  * - `bad-number:` — a non-finite `x`, `y`, `w`, `h`, or `w ≤ 0`, `h ≤ 0`.
+ * - `bad-src:` — a `src` that is present but not a string (T-023).
  */
 export function validateDoc(doc: Doc): string[] {
   const errors: string[] = [];
@@ -125,6 +126,13 @@ export function validateDoc(doc: Doc): string[] {
       errors.push(
         `group-dangling: node "${id}" groupId "${node.groupId}" does not exist`,
       );
+    }
+  }
+
+  // bad-src: an image source that is not a string (T-023).
+  for (const [id, node] of Object.entries(doc.nodes)) {
+    if (node.src !== undefined && typeof node.src !== 'string') {
+      errors.push(`bad-src: node "${id}" has a non-string src`);
     }
   }
 

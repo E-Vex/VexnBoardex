@@ -29,6 +29,7 @@ import {
   worldToScreen,
 } from './camera';
 import { dotCount, dotIndexRange, gridStep } from './grid';
+import { getImage } from './imageCache';
 import { layoutText } from './textLayout';
 import type { ConnectPreview, UiState } from './uiStore';
 import {
@@ -121,6 +122,28 @@ function drawNode(
   const y = ny + dy;
 
   if (node.kind !== 'text') {
+    // Image nodes paint their bitmap once decoded (T-023); until then the
+    // placeholder (fill + border) stays.
+    if (node.kind === 'image' && node.src !== undefined) {
+      const img = getImage(node.src);
+      if (img !== null) {
+        // Clip to the rounded rect so the bitmap respects the node shape.
+        const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
+        ctx.save();
+        ctx.beginPath();
+        roundRect(ctx, x, y, w, h, r);
+        ctx.clip();
+        ctx.drawImage(img, x, y, w, h);
+        ctx.restore();
+        // A crisp border over the bitmap edge.
+        ctx.beginPath();
+        roundRect(ctx, x, y, w, h, r);
+        ctx.lineWidth = NODE_BORDER_WIDTH;
+        ctx.strokeStyle = NODE_BORDER_COLOR;
+        ctx.stroke();
+        return;
+      }
+    }
     // Sticky notes get a soft shadow under the note (screen-constant blur).
     if (node.kind === 'sticky') {
       ctx.save();
