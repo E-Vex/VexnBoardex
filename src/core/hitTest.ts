@@ -19,11 +19,15 @@ function worldToScreen(cam: Camera, p: Point): Point {
   return { x: (p.x - cam.x) * cam.zoom, y: (p.y - cam.y) * cam.zoom };
 }
 
-/** A hit test result: either a node body or a connection handle. */
+/** A hit test result: a node body, a connection handle or a resize handle. */
 export type HitResult =
   | { type: 'node'; id: Id }
   | { type: 'handle'; id: Id; anchor: Anchor }
+  | { type: 'resize'; id: Id; corner: ResizeCorner }
   | null;
+
+/** The corners a resize handle can sit on (T-021). */
+export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
 /**
  * The id of the top-most node whose rect contains `point`, or `null` when no
@@ -52,6 +56,47 @@ export const HANDLE_ANCHORS: Anchor[] = ['top', 'right', 'bottom', 'left'];
  * This is the radius of the circular hit area around each handle midpoint.
  */
 export const HANDLE_HIT_RADIUS = 8;
+
+/**
+ * The screen-space hit radius of a resize handle (CSS px) (T-021).
+ */
+export const RESIZE_HANDLE_HIT_RADIUS = 8;
+
+/**
+ * Test if a world point hits a resize handle of the single selected node
+ * (T-021): resize handles exist only when exactly one node is selected.
+ * Returns `{ type: 'resize', id, corner }` on a hit, else falls through to
+ * the connection-handle test. Hit-testing happens in screen space so the
+ * targets stay constant on screen at any zoom.
+ */
+export function hitTestResizeHandles(
+  doc: Doc,
+  point: Point,
+  camera: { x: number; y: number; zoom: number },
+  selection: Id[],
+): HitResult {
+  if (selection.length !== 1) return null; // resize handles: single selection only
+  const id = selection[0]!;
+  const node = doc.nodes[id];
+  if (node === undefined) return null;
+
+  const pointScreen = worldToScreen(camera, point);
+  const corners: [ResizeCorner, number, number][] = [
+    ['nw', node.x, node.y],
+    ['ne', node.x + node.w, node.y],
+    ['sw', node.x, node.y + node.h],
+    ['se', node.x + node.w, node.y + node.h],
+  ];
+  for (const [corner, wx, wy] of corners) {
+    const cScreen = worldToScreen(camera, { x: wx, y: wy });
+    const dx = pointScreen.x - cScreen.x;
+    const dy = pointScreen.y - cScreen.y;
+    if (dx * dx + dy * dy <= RESIZE_HANDLE_HIT_RADIUS * RESIZE_HANDLE_HIT_RADIUS) {
+      return { type: 'resize', id, corner };
+    }
+  }
+  return null;
+}
 
 /**
  * Test if a world point hits a connection handle of a **selected** node

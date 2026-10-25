@@ -22,7 +22,7 @@
  * back.
  */
 
-import { hitTestWithHandles } from '../core/hitTest';
+import { hitTestWithHandles, hitTestResizeHandles } from '../core/hitTest';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
@@ -81,6 +81,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           break;
         case 'selectInRect':
           uiStore.setSelection(nodesIntersectingScreenRect(effect.rect));
+          break;
+        case 'setResize':
+          uiStore.setResize(effect.rect);
           break;
       }
     }
@@ -174,15 +177,33 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     if (e.pointerType === 'touch') return; // touch is out of scope
     if (isPanActive()) return; // Space+left and middle belong to panning
     const { screen, world } = positions(e);
+    const selection = uiStore.get().selection;
+    // A press on a resize handle of the single selected node starts a
+    // resize gesture (T-021) — checked before the connect handles and the
+    // body, because corners sit outside the node rect.
+    const resizeHit = hitTestResizeHandles(docStore.get(), world, cameraStore.get(), selection);
+    if (resizeHit !== null && resizeHit.type === 'resize') {
+      const node = docStore.get().nodes[resizeHit.id]!;
+      feed({
+        type: 'pointerDown',
+        button: e.button,
+        pointerId: e.pointerId,
+        screen,
+        world,
+        hitId: resizeHit.id,
+        shiftKey: e.shiftKey,
+        resize: {
+          id: resizeHit.id,
+          corner: resizeHit.corner,
+          rect: { x: node.x, y: node.y, w: node.w, h: node.h },
+        },
+      });
+      return;
+    }
     // A press on a connection handle of a selected node belongs to the
     // connect tool (T-018): stand down so the selection is not cleared and
     // no marquee starts. Body hits fall through like a plain hitTest.
-    const hit = hitTestWithHandles(
-      docStore.get(),
-      world,
-      cameraStore.get(),
-      uiStore.get().selection,
-    );
+    const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get(), selection);
     if (hit !== null && hit.type === 'handle') return;
     const hitId = hit !== null ? hit.id : null;
     feed({
@@ -193,6 +214,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       world,
       hitId,
       shiftKey: e.shiftKey,
+      resize: null,
     });
   }
 

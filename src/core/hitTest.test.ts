@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Doc, Node } from './types';
-import { hitTest, hitTestWithHandles } from './hitTest';
+import { hitTest, hitTestWithHandles, hitTestResizeHandles } from './hitTest';
 import type { Point } from './geometry';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
@@ -159,3 +159,43 @@ function handlePoint(
       return { x: n.x, y: n.y + n.h / 2 };
   }
 }
+
+describe('hitTestResizeHandles — corner hit-testing (T-021)', () => {
+  const cam = { x: -640, y: -360, zoom: 1 };
+
+  /** A single node a at (0,0) 200×80: corners (0,0),(200,0),(0,80),(200,80). */
+  function doc1(): Doc {
+    return docOf(node('a', { x: 0, y: 0, w: 200, h: 80 }));
+  }
+
+  it('each corner of the single selected node is hit', () => {
+    const d = doc1();
+    expect(hitTestResizeHandles(d, { x: 0, y: 0 }, cam, ['a'])).toEqual({
+      type: 'resize', id: 'a', corner: 'nw',
+    });
+    expect(hitTestResizeHandles(d, { x: 200, y: 0 }, cam, ['a'])).toEqual({
+      type: 'resize', id: 'a', corner: 'ne',
+    });
+    expect(hitTestResizeHandles(d, { x: 0, y: 80 }, cam, ['a'])).toEqual({
+      type: 'resize', id: 'a', corner: 'sw',
+    });
+    expect(hitTestResizeHandles(d, { x: 200, y: 80 }, cam, ['a'])).toEqual({
+      type: 'resize', id: 'a', corner: 'se',
+    });
+  });
+
+  it('no hit without a single selection', () => {
+    const d = doc1();
+    expect(hitTestResizeHandles(d, { x: 0, y: 0 }, cam, [])).toBeNull();
+    const d2 = docOf(
+      node('a', { x: 0, y: 0, w: 200, h: 80 }),
+      node('b', { x: 400, y: 0, w: 200, h: 80 }),
+    );
+    expect(hitTestResizeHandles(d2, { x: 0, y: 0 }, cam, ['a', 'b'])).toBeNull();
+  });
+
+  it('a point inside the body but away from corners is not a resize hit', () => {
+    const d = doc1();
+    expect(hitTestResizeHandles(d, { x: 100, y: 40 }, cam, ['a'])).toBeNull();
+  });
+});

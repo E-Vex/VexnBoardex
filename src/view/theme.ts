@@ -87,6 +87,12 @@ export const SELECTION_OUTLINE_WIDTH = 2;
  */
 export const SELECTION_OUTLINE_OFFSET = 3;
 
+/** Resize-handle metrics (T-021): squares at the selected node's corners. */
+export const RESIZE_HANDLE_SIZE = 8;
+export const RESIZE_HANDLE_BORDER_WIDTH = 2;
+export const RESIZE_HANDLE_COLOR = '#e8e8ef';
+export const RESIZE_HANDLE_BORDER_COLOR = '#f5a623';
+
 // ── Edges (T-010) ───────────────────────────────────────────────────────────
 
 /** Edge stroke colour — subtle but visible on the dark board. */
