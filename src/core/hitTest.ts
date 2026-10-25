@@ -54,9 +54,10 @@ export const HANDLE_ANCHORS: Anchor[] = ['top', 'right', 'bottom', 'left'];
 export const HANDLE_HIT_RADIUS = 8;
 
 /**
- * Test if a world point hits a connection handle of the top-most node.
- * Returns `{ type: 'handle', id, anchor }` if a handle is hit, otherwise
- * falls back to `hitTest` for the node body, or `null`.
+ * Test if a world point hits a connection handle of a **selected** node
+ * (T-018: handles are drawn only on selected nodes, so only those are
+ * hit-testable). Returns `{ type: 'handle', id, anchor }` if a handle is
+ * hit, otherwise falls back to `hitTest` for the node body, or `null`.
  *
  * Handles are at the midpoints of the 4 sides of the node's rect.
  * The hit test is done in screen space (so handle size is constant on screen).
@@ -65,10 +66,14 @@ export function hitTestWithHandles(
   doc: Doc,
   point: Point,
   camera: { x: number; y: number; zoom: number },
+  selection: Id[],
 ): HitResult {
-  // First check handles of the top-most node (in reverse order, same as hitTest).
+  // Handles of unselected nodes are not drawn — not hit-testable. An empty
+  // selection skips every node's handles.
+  const selected = new Set<Id>(selection);
   for (let i = doc.order.length - 1; i >= 0; i--) {
     const id = doc.order[i]!;
+    if (!selected.has(id)) continue;
     const node = doc.nodes[id];
     if (node === undefined) continue;
 

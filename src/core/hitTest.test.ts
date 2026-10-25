@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Doc, Node } from './types';
-import { hitTest } from './hitTest';
+import { hitTest, hitTestWithHandles } from './hitTest';
+import type { Point } from './geometry';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
   return {
@@ -98,3 +99,63 @@ describe('hitTest — misses (R1)', () => {
     expect(hitTest(doc, { x: -1, y: -1 })).toBeNull();
   });
 });
+
+describe('hitTestWithHandles — selection scope (T-018)', () => {
+  const cam = { x: -640, y: -360, zoom: 1 };
+
+  /** A doc with two disjoint nodes: a at (0,0) 200×80, b at (400,0) 200×80. */
+  function doc2(): Doc {
+    return docOf(
+      node('a', { x: 0, y: 0, w: 200, h: 80 }),
+      node('b', { x: 400, y: 0, w: 200, h: 80 }),
+    );
+  }
+
+  it('a handle of a selected node is hit', () => {
+    const d = doc2();
+    // a's right handle sits at world (200, 40).
+    const hit = hitTestWithHandles(d, { x: 200, y: 40 }, cam, ['a']);
+    expect(hit).toEqual({ type: 'handle', id: 'a', anchor: 'right' });
+  });
+
+  it('a handle of an UNSELECTED node is not hit — the body is', () => {
+    const d = doc2();
+    const hit = hitTestWithHandles(d, { x: 200, y: 40 }, cam, []);
+    expect(hit).toEqual({ type: 'node', id: 'a' });
+  });
+
+  it('handles of a selected node win over another selected node\'s body', () => {
+    const d = doc2();
+    // b's left handle sits at world (400, 40); with both selected, the
+    // top-most (b) is scanned first and its handle wins.
+    const hit = hitTestWithHandles(d, { x: 400, y: 40 }, cam, ['a', 'b']);
+    expect(hit).toEqual({ type: 'handle', id: 'b', anchor: 'left' });
+  });
+
+  it('with no selection at all, handles are not hit anywhere', () => {
+    const d = doc2();
+    for (const [id, n] of Object.entries(d.nodes)) {
+      for (const anchor of ['top', 'right', 'bottom', 'left'] as const) {
+        const p = handlePoint(n, anchor);
+        expect(hitTestWithHandles(d, p, cam, [])).toEqual({ type: 'node', id });
+      }
+    }
+  });
+});
+
+/** The world point of a node handle (mirrors the renderer's geometry). */
+function handlePoint(
+  n: { x: number; y: number; w: number; h: number },
+  anchor: 'top' | 'right' | 'bottom' | 'left',
+): Point {
+  switch (anchor) {
+    case 'top':
+      return { x: n.x + n.w / 2, y: n.y };
+    case 'right':
+      return { x: n.x + n.w, y: n.y + n.h / 2 };
+    case 'bottom':
+      return { x: n.x + n.w / 2, y: n.y + n.h };
+    case 'left':
+      return { x: n.x, y: n.y + n.h / 2 };
+  }
+}

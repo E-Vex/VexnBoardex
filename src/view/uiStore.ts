@@ -13,6 +13,7 @@
  */
 
 import type { Doc, Id } from '../core/types';
+import type { Point } from '../core/geometry';
 
 /**
  * A drag in progress (D-26): which nodes move and by how much, in **world**
@@ -24,6 +25,19 @@ export interface DragPreview {
   dy: number;
 }
 
+/**
+ * A connection gesture in progress (T-018): the node/anchor being dragged
+ * from and the current world-space endpoint under the cursor. Kept separate
+ * from `DragPreview` so a connect gesture can never be mistaken for a node
+ * drag (the renderer used to offset the from-node by the cursor's absolute
+ * world position). Preview only — the document is untouched (I-04).
+ */
+export interface ConnectPreview {
+  fromNode: Id;
+  fromAnchor: 'top' | 'right' | 'bottom' | 'left';
+  to: Point;
+}
+
 /** A box-select marquee rectangle in screen coordinates (T-016). */
 export interface BoxSelectRect {
   x: number;
@@ -32,10 +46,11 @@ export interface BoxSelectRect {
   h: number;
 }
 
-/** The UI state layer (D-25): selection ids plus the active drag preview and box-select rect. */
+/** The UI state layer (D-25): selection ids plus the active drag preview, connect preview and box-select rect. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
+  connect: ConnectPreview | null;
   boxSelect: BoxSelectRect | null;
 }
 
@@ -46,6 +61,8 @@ export interface UiStore {
   setSelection(ids: Id[]): void;
   /** Replace the drag preview (null = no drag). No notification when equal. */
   setDrag(drag: DragPreview | null): void;
+  /** Replace the connect preview (null = no gesture). No notification when equal. */
+  setConnect(connect: ConnectPreview | null): void;
   /** Replace the box-select rect (null = no box-select). No notification when equal. */
   setBoxSelect(rect: BoxSelectRect | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
@@ -69,6 +86,21 @@ function sameDrag(a: DragPreview | null, b: DragPreview | null): boolean {
   return a.dx === b.dx && a.dy === b.dy && sameIds(a.ids, b.ids);
 }
 
+/** True when two connect previews are equal (node, anchor, endpoint). */
+function sameConnect(
+  a: ConnectPreview | null,
+  b: ConnectPreview | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return (
+    a.fromNode === b.fromNode &&
+    a.fromAnchor === b.fromAnchor &&
+    a.to.x === b.to.x &&
+    a.to.y === b.to.y
+  );
+}
+
 /** True when two box-select rects are equal. */
 function sameBoxSelect(a: BoxSelectRect | null, b: BoxSelectRect | null): boolean {
   if (a === b) return true;
@@ -78,43 +110,64 @@ function sameBoxSelect(a: BoxSelectRect | null, b: BoxSelectRect | null): boolea
 
 /** True when two UI states are equal. */
 function sameUiState(a: UiState, b: UiState): boolean {
-  return sameIds(a.selection, b.selection) && sameDrag(a.drag, b.drag) && sameBoxSelect(a.boxSelect, b.boxSelect);
+  return (
+    sameIds(a.selection, b.selection) &&
+    sameDrag(a.drag, b.drag) &&
+    sameConnect(a.connect, b.connect) &&
+    sameBoxSelect(a.boxSelect, b.boxSelect)
+  );
 }
 
 /**
- * Create a UI store initialised to `{ selection: [], drag: null, boxSelect: null }`.
+ * Create a UI store initialised to `{ selection: [], drag: null, connect: null, boxSelect: null }`.
  */
 export function createUiStore(): UiStore {
-  let current: UiState = { selection: [], drag: null, boxSelect: null };
+  let current: UiState = { selection: [], drag: null, connect: null, boxSelect: null };
   const subscribers = new Set<(state: UiState) => void>();
+
+  function update(next: UiState): void {
+    if (sameUiState(next, current)) return;
+    current = next;
+    for (const fn of subscribers) {
+      fn(current);
+    }
+  }
 
   return {
     get() {
       return current;
     },
     setSelection(ids: Id[]) {
-      const next: UiState = { selection: ids, drag: current.drag, boxSelect: current.boxSelect };
-      if (sameUiState(next, current)) return;
-      current = next;
-      for (const fn of subscribers) {
-        fn(current);
-      }
+      update({
+        selection: ids,
+        drag: current.drag,
+        connect: current.connect,
+        boxSelect: current.boxSelect,
+      });
     },
     setDrag(drag: DragPreview | null) {
-      const next: UiState = { selection: current.selection, drag, boxSelect: current.boxSelect };
-      if (sameUiState(next, current)) return;
-      current = next;
-      for (const fn of subscribers) {
-        fn(current);
-      }
+      update({
+        selection: current.selection,
+        drag,
+        connect: current.connect,
+        boxSelect: current.boxSelect,
+      });
+    },
+    setConnect(connect: ConnectPreview | null) {
+      update({
+        selection: current.selection,
+        drag: current.drag,
+        connect,
+        boxSelect: current.boxSelect,
+      });
     },
     setBoxSelect(rect: BoxSelectRect | null) {
-      const next: UiState = { selection: current.selection, drag: current.drag, boxSelect: rect };
-      if (sameUiState(next, current)) return;
-      current = next;
-      for (const fn of subscribers) {
-        fn(current);
-      }
+      update({
+        selection: current.selection,
+        drag: current.drag,
+        connect: current.connect,
+        boxSelect: rect,
+      });
     },
     subscribe(fn: (state: UiState) => void): () => void {
       subscribers.add(fn);

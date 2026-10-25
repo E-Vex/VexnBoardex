@@ -3,11 +3,12 @@
  * (`connectTool.ts`). Converts pointer events into machine events and applies
  * the emitted effects:
  *
- * - `setDrag`  → `uiStore.setDrag` (preview line from handle to cursor)
+ * - `setConnect` → `uiStore.setConnect` (preview line from handle to cursor, T-018)
  * - `dispatch` → `docStore.dispatch` (I-03: the only mutation path)
  *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
- * position helper; hit-testing through `core/hitTest` with handles.
+ * position helper; hit-testing through `core/hitTest` with handles
+ * (restricted to the current selection — handles are drawn there only).
  * Nothing starts while a pan owns the pointer (`isPanActive`: Space held or
  * actively panning — D-26) or for touch pointers.
  */
@@ -53,8 +54,8 @@ export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
   function applyEffects(effects: ConnectEffect[]): void {
     for (const effect of effects) {
       switch (effect.type) {
-        case 'setDrag':
-          uiStore.setDrag(effect.drag);
+        case 'setConnect':
+          uiStore.setConnect(effect.preview);
           break;
         case 'dispatch':
           // The edge id in the preview command is a placeholder; replace with a real id.
@@ -98,7 +99,12 @@ export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
     if (e.pointerType === 'touch') return; // touch is out of scope
     if (isPanActive()) return; // Space+left and middle belong to panning
     const { screen, world } = positions(e);
-    const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get());
+    const hit = hitTestWithHandles(
+      docStore.get(),
+      world,
+      cameraStore.get(),
+      uiStore.get().selection,
+    );
     feed({
       type: 'pointerDown',
       button: e.button,
@@ -120,7 +126,12 @@ export function attachConnectInput(opts: ConnectInputOptions): ConnectInput {
     if (e.pointerType === 'touch') return;
     if (state.mode === 'idle') return; // nobody is connecting
     const { screen, world } = positions(e);
-    const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get());
+    const hit = hitTestWithHandles(
+      docStore.get(),
+      world,
+      cameraStore.get(),
+      uiStore.get().selection,
+    );
     feed({ type: 'pointerUp', pointerId: e.pointerId, screen, world, hit });
   }
 

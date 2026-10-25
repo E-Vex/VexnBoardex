@@ -37,6 +37,9 @@ const DEFAULT_COALESCE_WINDOW_MS = 300;
  * - `redo()` re-applies the most recently undone entry.
  * - `push(patch)` adds a new entry (clears redo stack).
  * - Coalescing merges rapid same-type commands within the time window.
+ *   Only `node.move` patches that touch the SAME set of node ids coalesce
+ *   (T-018): two quick creates are two undo steps — only repeated moves of
+ *   the same nodes (drag re-commits, arrow-key nudges) merge into one.
  */
 export function createHistory(config: HistoryConfig) {
   const maxSize = config.maxSize ?? DEFAULT_MAX_SIZE;
@@ -48,10 +51,16 @@ export function createHistory(config: HistoryConfig) {
   let lastPushTime = 0;
   let lastPatchType: string | null = null;
 
+  /** The most recent past entry, or null. */
+  function lastEntry(): HistoryEntry | null {
+    return past.length > 0 ? past[past.length - 1]! : null;
+  }
+
   /**
    * Push a new patch to history.
    * If the patch is empty, does nothing.
-   * Coalesces with previous entry if same type and within time window.
+   * Coalesces with the previous entry when both are `node.move` patches for
+   * the same set of node ids, pushed within the time window (T-018).
    */
   function push(patch: Patch, description?: string): void {
     if (isEmptyPatch(patch)) return;
@@ -59,15 +68,17 @@ export function createHistory(config: HistoryConfig) {
     const currentTime = now();
     const patchType = getPatchType(patch);
 
-    // Coalescing: if same type and within window, merge with previous entry.
+    // Coalescing: only repeated moves of the same nodes merge (T-018).
     if (
       past.length > 0 &&
       lastPatchType === patchType &&
+      patchType === 'node.move' &&
+      sameNodeIds(lastEntry()!.patch, patch) &&
       currentTime - lastPushTime <= coalesceWindowMs
     ) {
-      const lastEntry = past[past.length - 1]!;
-      lastEntry.patch = mergePatches(lastEntry.patch, patch);
-      lastEntry.description = description ?? lastEntry.description;
+      const lastEntryRef = past[past.length - 1]!;
+      lastEntryRef.patch = mergePatches(lastEntryRef.patch, patch);
+      lastEntryRef.description = description ?? lastEntryRef.description;
       lastPushTime = currentTime;
       return;
     }
@@ -141,6 +152,18 @@ export function createHistory(config: HistoryConfig) {
     getFutureLength,
     clear,
   };
+}
+
+/** True when two patches touch exactly the same set of node ids. */
+function sameNodeIds(a: Patch, b: Patch): boolean {
+  const ka = Object.keys(a.nodes);
+  const kb = Object.keys(b.nodes);
+  if (ka.length !== kb.length) return false;
+  const set = new Set(ka);
+  for (const id of kb) {
+    if (!set.has(id)) return false;
+  }
+  return true;
 }
 
 /** Determine the "type" of a patch for coalescing purposes. */

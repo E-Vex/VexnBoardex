@@ -22,7 +22,7 @@
  * back.
  */
 
-import { hitTest } from '../core/hitTest';
+import { hitTestWithHandles } from '../core/hitTest';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
@@ -174,7 +174,17 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     if (e.pointerType === 'touch') return; // touch is out of scope
     if (isPanActive()) return; // Space+left and middle belong to panning
     const { screen, world } = positions(e);
-    const hitId = hitTest(docStore.get(), world);
+    // A press on a connection handle of a selected node belongs to the
+    // connect tool (T-018): stand down so the selection is not cleared and
+    // no marquee starts. Body hits fall through like a plain hitTest.
+    const hit = hitTestWithHandles(
+      docStore.get(),
+      world,
+      cameraStore.get(),
+      uiStore.get().selection,
+    );
+    if (hit !== null && hit.type === 'handle') return;
+    const hitId = hit !== null ? hit.id : null;
     feed({
       type: 'pointerDown',
       button: e.button,
