@@ -36,6 +36,7 @@
 
 import type { Point } from '../core/geometry';
 import type { Command, Id } from '../core/types';
+import type { ResizeCorner } from '../core/hitTest';
 import type { DragPreview } from '../view/uiStore';
 
 /** The drag threshold in screen pixels (D-26): ≥ this distance starts a drag. */
@@ -44,7 +45,10 @@ export const DRAG_THRESHOLD = 4;
 /** The nudge distance in world units for arrow keys (T-016). */
 export const NUDGE_DISTANCE = 10;
 
-export type SelectMode = 'idle' | 'pressed' | 'dragging' | 'boxSelecting';
+/** The minimum width/height a resize gesture may produce (T-021). */
+export const MIN_NODE_SIZE = 20;
+
+export type SelectMode = 'idle' | 'pressed' | 'dragging' | 'boxSelecting' | 'resizing';
 
 /** The state machine state (R4): `startScreen`/`startWorld` are the press point. */
 export interface SelectState {
@@ -57,6 +61,8 @@ export interface SelectState {
   boxSelectRect: { x: number; y: number; w: number; h: number } | null;
   /** The ids that move together during a drag (T-017: group move). */
   dragIds: Id[];
+  /** For resizing: the node, its corner and the rect at press time (T-021). */
+  resize: { id: Id; corner: ResizeCorner; rect: { x: number; y: number; w: number; h: number } } | null;
 }
 
 /** Events fed into the machine (R4). */
@@ -69,6 +75,9 @@ export type SelectEvent =
       world: Point;
       hitId: Id | null;
       shiftKey: boolean;
+      /** A resize handle under the press (T-021): its node, corner and the
+       * node's current rect. Present only for the single selected node. */
+      resize?: { id: Id; corner: ResizeCorner; rect: { x: number; y: number; w: number; h: number } } | null;
     }
   | { type: 'pointerMove'; pointerId: number; screen: Point; world: Point }
   | { type: 'pointerUp'; pointerId: number; screen: Point; world: Point }
@@ -86,6 +95,11 @@ export type SelectEffect =
       /** Select every node intersecting this screen-space rect (T-017). */
       type: 'selectInRect';
       rect: { x: number; y: number; w: number; h: number };
+    }
+  | {
+      /** Show a resize preview rect for a node (T-021). */
+      type: 'setResize';
+      rect: { id: Id; x: number; y: number; w: number; h: number } | null;
     };
 
 /** Per-event context: the current selection (read from the UI store). */
@@ -108,7 +122,60 @@ export function initialSelectState(): SelectState {
     hitId: null,
     boxSelectRect: null,
     dragIds: [],
+    resize: null,
   };
+}
+
+/**
+ * The resize rect resulting from dragging `corner` of `orig` to `world`
+ * (T-021): the opposite corner stays anchored; both dimensions clamp to
+ * MIN_NODE_SIZE. Pure.
+ */
+export function resizeRect(
+  orig: { x: number; y: number; w: number; h: number },
+  corner: ResizeCorner,
+  world: Point,
+): { x: number; y: number; w: number; h: number } {
+  let x = orig.x;
+  let y = orig.y;
+  let w = orig.w;
+  let h = orig.h;
+  switch (corner) {
+    case 'nw':
+      x = world.x;
+      y = world.y;
+      w = orig.x + orig.w - world.x;
+      h = orig.y + orig.h - world.y;
+      break;
+    case 'ne':
+      y = world.y;
+      w = world.x - orig.x;
+      h = orig.y + orig.h - world.y;
+      break;
+    case 'sw':
+      x = world.x;
+      w = orig.x + orig.w - world.x;
+      h = world.y - orig.y;
+      break;
+    case 'se':
+      w = world.x - orig.x;
+      h = world.y - orig.y;
+      break;
+  }
+  // Clamp to the minimum, keeping the anchored corner fixed.
+  if (w < MIN_NODE_SIZE) {
+    if (corner === 'nw' || corner === 'sw') {
+      x = orig.x + orig.w - MIN_NODE_SIZE;
+    }
+    w = MIN_NODE_SIZE;
+  }
+  if (h < MIN_NODE_SIZE) {
+    if (corner === 'nw' || corner === 'ne') {
+      y = orig.y + orig.h - MIN_NODE_SIZE;
+    }
+    h = MIN_NODE_SIZE;
+  }
+  return { x, y, w, h };
 }
 
 /** The marquee rect spanned by two screen points, normalised to positive w/h. */
@@ -163,6 +230,23 @@ export function reduce(
       // A second pointer is ignored while a gesture is active.
       if (state.mode !== 'idle') return { state, effects: [] };
 
+      // A press on a resize handle of the single selected node starts a
+      // resize gesture (T-021): the selection stays, no marquee, no drag.
+      if (event.resize !== null && event.resize !== undefined) {
+        return {
+          state: {
+            ...initialSelectState(),
+            mode: 'resizing',
+            pointerId: event.pointerId,
+            startScreen: event.screen,
+            startWorld: event.world,
+            hitId: event.resize.id,
+            resize: event.resize,
+          },
+          effects: [],
+        };
+      }
+
       if (event.hitId !== null) {
         // Press on a node: shift+click toggles, otherwise select (or keep selected)
         // and start a possible drag (D-26). When the pressed node belongs to
@@ -195,6 +279,7 @@ export function reduce(
             hitId: event.hitId,
             boxSelectRect: null,
             dragIds,
+            resize: null,
           },
           effects,
         };
@@ -216,6 +301,7 @@ export function reduce(
           startWorld: event.world,
           boxSelectRect: rect,
           dragIds: [],
+          resize: null,
         },
         effects: [...effects, { type: 'setBoxSelect', rect }],
       };
@@ -247,6 +333,20 @@ export function reduce(
         };
       }
 
+      if (state.mode === 'resizing') {
+        // Pointer-move only updates the preview rect (I-04, T-021).
+        const rect = resizeRect(state.resize!.rect, state.resize!.corner, event.world);
+        return {
+          state,
+          effects: [
+            {
+              type: 'setResize',
+              rect: { id: state.resize!.id, x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+            },
+          ],
+        };
+      }
+
       // Dragging: pointer-move only updates the preview (I-04).
       return {
         state,
@@ -272,6 +372,29 @@ export function reduce(
           effects: [
             { type: 'setBoxSelect', rect: null },
             { type: 'selectInRect', rect },
+          ],
+        };
+      }
+
+      if (state.mode === 'resizing') {
+        // Commit exactly ONE node.resize with the rect at release (T-021,
+        // I-04: pointer-move only previewed until now).
+        const final = resizeRect(state.resize!.rect, state.resize!.corner, event.world);
+        return {
+          state: idle(),
+          effects: [
+            { type: 'setResize', rect: null },
+            {
+              type: 'dispatch',
+              command: {
+                type: 'node.resize',
+                id: state.resize!.id,
+                x: final.x,
+                y: final.y,
+                w: final.w,
+                h: final.h,
+              },
+            },
           ],
         };
       }
@@ -358,6 +481,8 @@ function cancel(state: SelectState): SelectResult {
   const effects: SelectEffect[] =
     state.mode === 'dragging' || state.mode === 'boxSelecting'
       ? [{ type: 'setDrag', drag: null }, { type: 'setBoxSelect', rect: null }]
-      : [];
+      : state.mode === 'resizing'
+        ? [{ type: 'setResize', rect: null }]
+        : [];
   return { state: idle(), effects };
 }

@@ -59,6 +59,10 @@ import {
   HANDLE_RADIUS,
   HANDLE_BORDER_WIDTH,
   HANDLE_OFFSET,
+  RESIZE_HANDLE_SIZE,
+  RESIZE_HANDLE_BORDER_WIDTH,
+  RESIZE_HANDLE_COLOR,
+  RESIZE_HANDLE_BORDER_COLOR,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -376,6 +380,37 @@ function drawHandles(
   }
 }
 
+// ── Resize handles (T-021) ─────────────────────────────────────────────────
+
+/**
+ * Draw the 4 corner resize handles for a node rect (T-021): squares centred
+ * exactly on the corners, drawn in world coordinates with /scale sizes so
+ * they stay constant on screen at any zoom and DPR. Shown only while a
+ * single node is selected (mirrors `hitTestResizeHandles`).
+ */
+function drawResizeHandles(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; w: number; h: number },
+  scale: number,
+): void {
+  const half = RESIZE_HANDLE_SIZE / scale / 2;
+  const corners: [number, number][] = [
+    [rect.x, rect.y],
+    [rect.x + rect.w, rect.y],
+    [rect.x, rect.y + rect.h],
+    [rect.x + rect.w, rect.y + rect.h],
+  ];
+  ctx.lineWidth = RESIZE_HANDLE_BORDER_WIDTH / scale;
+  ctx.fillStyle = RESIZE_HANDLE_COLOR;
+  ctx.strokeStyle = RESIZE_HANDLE_BORDER_COLOR;
+  for (const [cx, cy] of corners) {
+    ctx.beginPath();
+    ctx.rect(cx - half, cy - half, half * 2, half * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
 // ── Connection preview drawing (T-011) ──────────────────────────────────────
 
 /**
@@ -441,6 +476,7 @@ export function renderBoard(
     drag: null,
     connect: null,
     editing: null,
+    resize: null,
     boxSelect: null,
   },
 ): void {
@@ -493,21 +529,26 @@ export function renderBoard(
   const dragPreview = ui.drag
     ? { ids: new Set(ui.drag.ids), dx: ui.drag.dx, dy: ui.drag.dy }
     : null;
+  // A resize preview overrides the node's rect entirely (T-021): edges
+  // must follow the previewed geometry, exactly like a drag does.
+  const resizePreview = ui.resize;
+  const rectOf = (id: string) => {
+    const node = doc.nodes[id];
+    if (!node) return undefined;
+    if (resizePreview !== null && resizePreview.id === id) {
+      return { x: resizePreview.x, y: resizePreview.y, w: resizePreview.w, h: resizePreview.h };
+    }
+    const isDragged = dragPreview !== null && dragPreview.ids.has(id);
+    const dx = isDragged ? dragPreview.dx : 0;
+    const dy = isDragged ? dragPreview.dy : 0;
+    return { x: node.x + dx, y: node.y + dy, w: node.w, h: node.h };
+  };
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const edge of Object.values(doc.edges)) {
     // Quick culling: if both endpoints are outside visible, skip.
     // We use a loose check by computing the edge's bbox from its endpoints.
-    const rectOfForCull = (id: string) => {
-      const node = doc.nodes[id];
-      if (!node) return undefined;
-      const isDragged = dragPreview !== null && dragPreview.ids.has(id);
-      const dx = isDragged ? dragPreview.dx : 0;
-      const dy = isDragged ? dragPreview.dy : 0;
-      const r = nodeRect(node);
-      return { x: r.x + dx, y: r.y + dy, w: r.w, h: r.h };
-    };
-    const endpoints = edgeEndpoints(edge, rectOfForCull);
+    const endpoints = edgeEndpoints(edge, rectOf);
     if (!endpoints) continue;
     // Rough bbox culling: if both endpoints are outside visible, skip.
     const fromIn = rectContains(visible, endpoints.from);
@@ -549,34 +590,51 @@ export function renderBoard(
   const draggedIds = drag !== null ? new Set(drag.ids) : null;
   const dragDx = drag !== null ? drag.dx : 0;
   const dragDy = drag !== null ? drag.dy : 0;
+  // Resize handles exist only for a single selected node (T-021).
+  const showResizeHandles = ui.selection.length === 1;
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const id of doc.order) {
     const node = doc.nodes[id];
     if (node === undefined) continue; // defensive: order must be a permutation
-    // Drag preview offset (R5): drawn at the offset position; the document
-    // is not touched. Culling uses the rect actually drawn.
+    // Drag preview offset (R5) and resize preview rect (T-021): drawn at the
+    // previewed geometry; the document is not touched. Culling uses the
+    // rect actually drawn.
     const isDragged = draggedIds !== null && draggedIds.has(id);
     const dx = isDragged ? dragDx : 0;
     const dy = isDragged ? dragDy : 0;
-    const x = node.x + dx;
-    const y = node.y + dy;
+    // A resize preview replaces the node's rect wholesale (T-021).
+    const resized =
+      ui.resize !== null && ui.resize.id === id
+        ? { x: ui.resize.x, y: ui.resize.y, w: ui.resize.w, h: ui.resize.h }
+        : null;
+    const x = resized !== null ? resized.x : node.x + dx;
+    const y = resized !== null ? resized.y : node.y + dy;
+    const w = resized !== null ? resized.w : node.w;
+    const h = resized !== null ? resized.h : node.h;
     // Culling (R6): skip nodes whose drawn rect does not intersect the
     // visible rect — a selected node is culled like any other (R5).
-    if (!rectsIntersect({ x, y, w: node.w, h: node.h }, visible)) continue;
+    if (!rectsIntersect({ x, y, w, h }, visible)) continue;
     // T-020: while the DOM overlay edits a node, its canvas text is skipped
     // (the overlay shows the text); the fill/border still paint beneath it.
-    drawNode(ctx, node, m.scale, dx, dy, id !== ui.editing);
+    drawNode(
+      ctx,
+      resized !== null ? { ...node, x, y, w, h } : node,
+      m.scale,
+      dx,
+      dy,
+      id !== ui.editing,
+    );
     // Draw connection handles on selected nodes (T-011). Handles are drawn
     // in world space with /scale sizes — DPR- and zoom-safe (T-018).
     if (selected.has(id)) {
-      drawHandles(ctx, { x, y, w: node.w, h: node.h }, m.scale);
+      drawHandles(ctx, { x, y, w, h }, m.scale);
       drawSelectionOutline(
         ctx,
         x,
         y,
-        node.w,
-        node.h,
+        w,
+        h,
         m.scale,
         node.kind === 'sticky'
           ? STICKY_CORNER_RADIUS
@@ -584,6 +642,10 @@ export function renderBoard(
             ? TEXT_NODE_CORNER_RADIUS
             : CORNER_RADIUS,
       );
+      // Corner resize handles, single selection only (T-021).
+      if (showResizeHandles) {
+        drawResizeHandles(ctx, { x, y, w, h }, m.scale);
+      }
     }
   }
   ctx.restore();

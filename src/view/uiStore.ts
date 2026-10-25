@@ -46,15 +46,25 @@ export interface BoxSelectRect {
   h: number;
 }
 
+/** A resize preview rect for one node, in world coordinates (T-021). */
+export interface ResizePreview {
+  id: Id;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** The UI state layer (D-25): selection ids, the active previews, the node
  * being text-edited and the box-select rect. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
   connect: ConnectPreview | null;
-  /** The id of the node whose text is being edited in the DOM overlay
-   * (T-020): the renderer skips that node's text while the overlay is open. */
+  /** The node being text-edited in the DOM overlay (T-020). */
   editing: Id | null;
+  /** A resize gesture preview (T-021). */
+  resize: ResizePreview | null;
   boxSelect: BoxSelectRect | null;
 }
 
@@ -69,6 +79,8 @@ export interface UiStore {
   setConnect(connect: ConnectPreview | null): void;
   /** Set the node being text-edited (null = none). No notification when equal. */
   setEditing(id: Id | null): void;
+  /** Replace the resize preview (null = no gesture). No notification when equal. */
+  setResize(resize: ResizePreview | null): void;
   /** Replace the box-select rect (null = no box-select). No notification when equal. */
   setBoxSelect(rect: BoxSelectRect | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
@@ -121,13 +133,22 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameDrag(a.drag, b.drag) &&
     sameConnect(a.connect, b.connect) &&
     a.editing === b.editing &&
+    sameResize(a.resize, b.resize) &&
     sameBoxSelect(a.boxSelect, b.boxSelect)
   );
 }
 
+/** True when two resize previews are equal. */
+function sameResize(a: ResizePreview | null, b: ResizePreview | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
 /**
- * Create a UI store initialised to
- * `{ selection: [], drag: null, connect: null, editing: null, boxSelect: null }`.
+ * Create a UI store initialised to all-empty UI state
+ * `{ selection: [], drag: null, connect: null, editing: null, resize: null,
+ *    boxSelect: null }`.
  */
 export function createUiStore(): UiStore {
   let current: UiState = {
@@ -135,11 +156,14 @@ export function createUiStore(): UiStore {
     drag: null,
     connect: null,
     editing: null,
+    resize: null,
     boxSelect: null,
   };
   const subscribers = new Set<(state: UiState) => void>();
 
-  function update(next: UiState): void {
+  /** Replace one field, keeping the others (immutable state, I-05). */
+  function patch(part: Partial<UiState>): void {
+    const next: UiState = { ...current, ...part };
     if (sameUiState(next, current)) return;
     current = next;
     for (const fn of subscribers) {
@@ -152,49 +176,22 @@ export function createUiStore(): UiStore {
       return current;
     },
     setSelection(ids: Id[]) {
-      update({
-        selection: ids,
-        drag: current.drag,
-        connect: current.connect,
-        editing: current.editing,
-        boxSelect: current.boxSelect,
-      });
+      patch({ selection: ids });
     },
     setDrag(drag: DragPreview | null) {
-      update({
-        selection: current.selection,
-        drag,
-        connect: current.connect,
-        editing: current.editing,
-        boxSelect: current.boxSelect,
-      });
+      patch({ drag });
     },
     setConnect(connect: ConnectPreview | null) {
-      update({
-        selection: current.selection,
-        drag: current.drag,
-        connect,
-        editing: current.editing,
-        boxSelect: current.boxSelect,
-      });
+      patch({ connect });
     },
     setEditing(id: Id | null) {
-      update({
-        selection: current.selection,
-        drag: current.drag,
-        connect: current.connect,
-        editing: id,
-        boxSelect: current.boxSelect,
-      });
+      patch({ editing: id });
+    },
+    setResize(resize: ResizePreview | null) {
+      patch({ resize });
     },
     setBoxSelect(rect: BoxSelectRect | null) {
-      update({
-        selection: current.selection,
-        drag: current.drag,
-        connect: current.connect,
-        editing: current.editing,
-        boxSelect: rect,
-      });
+      patch({ boxSelect: rect });
     },
     subscribe(fn: (state: UiState) => void): () => void {
       subscribers.add(fn);

@@ -312,7 +312,7 @@ describe('renderBoard — empty document (T-007 R12)', () => {
 });
 
 // T-008 R9 — selection outline and drag preview.
-import { HANDLE_BORDER_COLOR } from './theme';
+import { HANDLE_BORDER_COLOR, RESIZE_HANDLE_BORDER_COLOR } from './theme';
 
 describe('renderBoard — selection outline (T-008 R9)', () => {
   const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
@@ -325,12 +325,16 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
-    // Origin marker (1) + node border (1) + 4 handles (4) + outline (1) = 7 strokes total.
-    expect(countCalls(ctx, 'stroke')).toBe(7);
-    // Stroke styles in order: origin, node border, 4× handle border, then the accent outline.
+    // Origin marker (1) + node border (1) + 4 connect handles (4) + outline
+    // (1) + 4 resize handles (4) = 11 strokes total (resize handles appear
+    // for the single selected node, T-021).
+    expect(countCalls(ctx, 'stroke')).toBe(11);
+    // Stroke styles in order: origin, node border, 4× connect-handle border,
+    // the accent outline, then 4× resize-handle border (T-021).
     const styles = ctx.calls
       .filter((c) => c.name === 'strokeStyle')
       .map((c) => c.args[0]);
@@ -342,13 +346,19 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       HANDLE_BORDER_COLOR,
       HANDLE_BORDER_COLOR,
       SELECTION_COLOR,
+      // drawResizeHandles sets the style once for all four corner strokes.
+      RESIZE_HANDLE_BORDER_COLOR,
     ]);
-    // The outline stroke happens after the node's fill call (the last fill:
-    // the grid fill came earlier, the node fill is last).
+    // The outline stroke happens after the node's own fill (so it paints on
+    // top of it): find the fill whose style is the node colour '#ffffff'.
+    const nodeFillIdx = ctx.calls.findIndex(
+      (c) => c.name === 'fillStyle' && c.args[0] === '#ffffff',
+    );
     const outlineStrokeIdx = ctx.calls.findIndex(
       (c) => c.name === 'strokeStyle' && c.args[0] === SELECTION_COLOR,
     );
-    expect(outlineStrokeIdx).toBeGreaterThan(lastIndex(ctx, 'fill'));
+    expect(nodeFillIdx).toBeGreaterThan(-1);
+    expect(outlineStrokeIdx).toBeGreaterThan(nodeFillIdx);
   });
 
   it('an unselected node gets no outline stroke', () => {
@@ -359,6 +369,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -380,6 +391,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -405,6 +417,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
         drag: null,
         connect: null,
         editing: null,
+        resize: null,
         boxSelect: null,
       });
 
@@ -428,6 +441,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -453,6 +467,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -480,6 +495,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -498,6 +514,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -519,6 +536,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -585,6 +603,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -609,6 +628,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -629,6 +649,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -652,6 +673,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 
@@ -671,6 +693,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       drag: null,
       connect: null,
       editing: null,
+      resize: null,
       boxSelect: null,
     });
 

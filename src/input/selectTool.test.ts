@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DRAG_THRESHOLD,
+  MIN_NODE_SIZE,
+  resizeRect,
   type SelectCtx,
   type SelectEffect,
   type SelectEvent,
@@ -529,5 +531,112 @@ describe('selectTool — group move (T-017)', () => {
       { selection: ['a'] },
     ).state;
     expect(st.dragIds).toEqual(['a', 'b']);
+  });
+});
+
+describe('selectTool — resize gesture (T-021)', () => {
+  /** A pointerDown on the SE corner of node 'a' (rect 0,0 200×120). */
+  function resizeDown() {
+    return run(
+      initialSelectState(),
+      {
+        type: 'pointerDown',
+        button: 0,
+        pointerId: 1,
+        screen: p(200, 120),
+        world: p(200, 120),
+        hitId: 'a',
+        shiftKey: false,
+        resize: { id: 'a', corner: 'se', rect: { x: 0, y: 0, w: 200, h: 120 } },
+      },
+      SEL_A,
+    );
+  }
+
+  it('a resize-handle press enters resizing without touching the selection', () => {
+    const r = resizeDown();
+    expect(r.state.mode).toBe('resizing');
+    expect(r.effects).toEqual([]);
+  });
+
+  it('pointer-move only previews: one setResize effect per move (I-04)', () => {
+    const st = resizeDown().state;
+    const r = run(st, move(p(300, 200), p(300, 200)), SEL_A);
+    expect(r.state.mode).toBe('resizing');
+    expect(r.effects).toEqual([
+      { type: 'setResize', rect: { id: 'a', x: 0, y: 0, w: 300, h: 200 } },
+    ]);
+  });
+
+  it('pointer-up commits exactly ONE node.resize with the final rect', () => {
+    let st = resizeDown().state;
+    st = run(st, move(p(320, 240), p(320, 240)), SEL_A).state;
+    const r = run(st, up(p(320, 240), p(320, 240)), SEL_A);
+    expect(r.state.mode).toBe('idle');
+    expect(ofType(r.effects, 'dispatch')).toEqual([
+      {
+        type: 'dispatch',
+        command: { type: 'node.resize', id: 'a', x: 0, y: 0, w: 320, h: 240 },
+      },
+    ]);
+    expect(ofType(r.effects, 'setResize')).toEqual([
+      { type: 'setResize', rect: null },
+    ]);
+  });
+
+  it('the NW corner anchors the south-east corner', () => {
+    const down = run(
+      initialSelectState(),
+      {
+        type: 'pointerDown',
+        button: 0,
+        pointerId: 1,
+        screen: p(0, 0),
+        world: p(0, 0),
+        hitId: 'a',
+        shiftKey: false,
+        resize: { id: 'a', corner: 'nw', rect: { x: 0, y: 0, w: 200, h: 120 } },
+      },
+      SEL_A,
+    );
+    const r = run(down.state, move(p(-50, -30), p(-50, -30)), SEL_A);
+    expect(ofType(r.effects, 'setResize')).toEqual([
+      { type: 'setResize', rect: { id: 'a', x: -50, y: -30, w: 250, h: 150 } },
+    ]);
+  });
+
+  it('dragging a corner past the opposite edge clamps to MIN_NODE_SIZE', () => {
+    const st = resizeDown().state;
+    // Drag the SE corner far to the upper-left of the anchored NW corner.
+    const r = run(st, move(p(-500, -500), p(-500, -500)), SEL_A);
+    expect(ofType(r.effects, 'setResize')).toEqual([
+      { type: 'setResize', rect: { id: 'a', x: 0, y: 0, w: MIN_NODE_SIZE, h: MIN_NODE_SIZE } },
+    ]);
+  });
+
+  it('Escape during a resize cancels with no command', () => {
+    let st = resizeDown().state;
+    st = run(st, move(p(300, 200), p(300, 200)), SEL_A).state;
+    const r = run(st, keyEvent('Escape'), SEL_A);
+    expect(r.state.mode).toBe('idle');
+    expect(r.effects).toEqual([{ type: 'setResize', rect: null }]);
+  });
+});
+
+describe('resizeRect — geometry (T-021)', () => {
+  const orig = { x: 10, y: 20, w: 100, h: 50 };
+
+  it('se grows to the cursor', () => {
+    expect(resizeRect(orig, 'se', { x: 110, y: 70 })).toEqual({ x: 10, y: 20, w: 100, h: 50 });
+    expect(resizeRect(orig, 'se', { x: 160, y: 120 })).toEqual({ x: 10, y: 20, w: 150, h: 100 });
+  });
+
+  it('nw moves x/y and keeps the se corner fixed', () => {
+    expect(resizeRect(orig, 'nw', { x: 0, y: 0 })).toEqual({ x: 0, y: 0, w: 110, h: 70 });
+  });
+
+  it('ne and sw each move one edge only', () => {
+    expect(resizeRect(orig, 'ne', { x: 200, y: 0 })).toEqual({ x: 10, y: 0, w: 190, h: 70 });
+    expect(resizeRect(orig, 'sw', { x: 0, y: 100 })).toEqual({ x: 0, y: 20, w: 110, h: 80 });
   });
 });
