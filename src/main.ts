@@ -16,6 +16,7 @@ import { attachNodeInput } from './input/nodeInput';
 import { attachSelectInput } from './input/selectInput';
 import { attachConnectInput } from './input/connectInput';
 import { createHud } from './ui/hud';
+import { createTextEditor } from './ui/textEditor';
 import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
@@ -116,14 +117,23 @@ const input = attachCameraInput({
 });
 
 // Node input: double-click on empty space creates a card at the cursor
-// through docStore.dispatch (T-007 R8, I-03) and selects it (T-008 D-28).
-// IDs are generated here, outside core (D-11).
+// through docStore.dispatch (T-007 R8, I-03), selects it (T-008 D-28) and
+// opens the text editor on it; double-click on a node opens the editor on
+// that node (T-020). IDs are generated here, outside core (D-11).
 const nodeInput = attachNodeInput({
   canvas: host.canvas,
   cameraStore: store,
   docStore,
   uiStore,
   newId: () => crypto.randomUUID(),
+  editNode: (id) => textEditor.edit(id),
+});
+
+// In-place text editor overlay (T-020): one node.update command per commit.
+const textEditor = createTextEditor({
+  cameraStore: store,
+  docStore,
+  uiStore,
 });
 
 // Select input: select, move and delete cards (T-008 R6). Space+left and
@@ -207,6 +217,18 @@ window.addEventListener('keydown', (e) => {
   const isMac = navigator.platform.includes('Mac');
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const shift = e.shiftKey;
+
+  // Enter / F2 with exactly one node selected opens the text editor (T-020).
+  if ((e.key === 'Enter' || e.key === 'F2') && !mod) {
+    const selection = uiStore.get().selection;
+    if (selection.length === 1 && !textEditor.isOpen()) {
+      e.preventDefault();
+      textEditor.edit(selection[0]!);
+      return;
+    }
+  }
+  // Escape while editing cancels without a command (the editor handles its
+  // own Escape; this clears a stale selection when not editing).
 
   if (mod) {
     switch (e.key.toLowerCase()) {

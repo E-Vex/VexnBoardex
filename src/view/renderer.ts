@@ -110,6 +110,7 @@ function drawNode(
   scale: number,
   dx = 0,
   dy = 0,
+  drawText = true,
 ): void {
   const { x: nx, y: ny, w, h } = node;
   const x = nx + dx;
@@ -141,6 +142,7 @@ function drawNode(
   }
 
   // Text LOD (R6): below the minimum on-screen size, skip the text.
+  if (!drawText) return; // T-020: the DOM overlay owns the edited node's text
   if (FONT_SIZE * scale < MIN_TEXT_SIZE) return;
   if (node.text === '') return;
 
@@ -434,7 +436,13 @@ export function renderBoard(
   viewport: Viewport,
   camera: Camera,
   doc: Doc,
-  ui: UiState = { selection: [], drag: null, connect: null, boxSelect: null },
+  ui: UiState = {
+    selection: [],
+    drag: null,
+    connect: null,
+    editing: null,
+    boxSelect: null,
+  },
 ): void {
   const { width, height } = viewport;
 
@@ -556,7 +564,9 @@ export function renderBoard(
     // Culling (R6): skip nodes whose drawn rect does not intersect the
     // visible rect — a selected node is culled like any other (R5).
     if (!rectsIntersect({ x, y, w: node.w, h: node.h }, visible)) continue;
-    drawNode(ctx, node, m.scale, dx, dy);
+    // T-020: while the DOM overlay edits a node, its canvas text is skipped
+    // (the overlay shows the text); the fill/border still paint beneath it.
+    drawNode(ctx, node, m.scale, dx, dy, id !== ui.editing);
     // Draw connection handles on selected nodes (T-011). Handles are drawn
     // in world space with /scale sizes — DPR- and zoom-safe (T-018).
     if (selected.has(id)) {

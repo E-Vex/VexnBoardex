@@ -29,7 +29,7 @@ function docOf(...ids: string[]): Doc {
 describe('createUiStore — initial state (R3)', () => {
   it('starts with an empty selection and no drag', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null, boxSelect: null, connect: null });
+    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, boxSelect: null });
   });
 });
 
@@ -45,6 +45,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       selection: ['a'],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
   });
@@ -85,6 +86,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       selection: ['a', 'b'],
       drag: { ids: ['a'], dx: 10, dy: 20 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
   });
@@ -144,7 +146,7 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null, boxSelect: null, connect: null });
+    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, boxSelect: null });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
@@ -187,5 +189,38 @@ describe('pruneSelection (R3)', () => {
 
   it('works on an empty doc', () => {
     expect(pruneSelection(['x'], docOf())).toEqual([]);
+  });
+});
+
+describe('setEditing — the node being text-edited (T-020)', () => {
+  it('stores the editing id and notifies', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setEditing('n1');
+    expect(store.get().editing).toBe('n1');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('null again notifies; same id does not', () => {
+    const store = createUiStore();
+    store.setEditing('n1');
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setEditing('n1');
+    expect(fn).not.toHaveBeenCalled();
+    store.setEditing(null);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(store.get().editing).toBeNull();
+  });
+
+  it('keeps the selection and drag untouched', () => {
+    const store = createUiStore();
+    store.setSelection(['a', 'b']);
+    store.setDrag({ ids: ['a'], dx: 1, dy: 2 });
+    store.setEditing('a');
+    expect(store.get().selection).toEqual(['a', 'b']);
+    expect(store.get().drag).toEqual({ ids: ['a'], dx: 1, dy: 2 });
+    expect(store.get().editing).toBe('a');
   });
 });

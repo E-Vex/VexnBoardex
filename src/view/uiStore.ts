@@ -46,11 +46,15 @@ export interface BoxSelectRect {
   h: number;
 }
 
-/** The UI state layer (D-25): selection ids plus the active drag preview, connect preview and box-select rect. */
+/** The UI state layer (D-25): selection ids, the active previews, the node
+ * being text-edited and the box-select rect. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
   connect: ConnectPreview | null;
+  /** The id of the node whose text is being edited in the DOM overlay
+   * (T-020): the renderer skips that node's text while the overlay is open. */
+  editing: Id | null;
   boxSelect: BoxSelectRect | null;
 }
 
@@ -63,6 +67,8 @@ export interface UiStore {
   setDrag(drag: DragPreview | null): void;
   /** Replace the connect preview (null = no gesture). No notification when equal. */
   setConnect(connect: ConnectPreview | null): void;
+  /** Set the node being text-edited (null = none). No notification when equal. */
+  setEditing(id: Id | null): void;
   /** Replace the box-select rect (null = no box-select). No notification when equal. */
   setBoxSelect(rect: BoxSelectRect | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
@@ -114,15 +120,23 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameIds(a.selection, b.selection) &&
     sameDrag(a.drag, b.drag) &&
     sameConnect(a.connect, b.connect) &&
+    a.editing === b.editing &&
     sameBoxSelect(a.boxSelect, b.boxSelect)
   );
 }
 
 /**
- * Create a UI store initialised to `{ selection: [], drag: null, connect: null, boxSelect: null }`.
+ * Create a UI store initialised to
+ * `{ selection: [], drag: null, connect: null, editing: null, boxSelect: null }`.
  */
 export function createUiStore(): UiStore {
-  let current: UiState = { selection: [], drag: null, connect: null, boxSelect: null };
+  let current: UiState = {
+    selection: [],
+    drag: null,
+    connect: null,
+    editing: null,
+    boxSelect: null,
+  };
   const subscribers = new Set<(state: UiState) => void>();
 
   function update(next: UiState): void {
@@ -142,6 +156,7 @@ export function createUiStore(): UiStore {
         selection: ids,
         drag: current.drag,
         connect: current.connect,
+        editing: current.editing,
         boxSelect: current.boxSelect,
       });
     },
@@ -150,6 +165,7 @@ export function createUiStore(): UiStore {
         selection: current.selection,
         drag,
         connect: current.connect,
+        editing: current.editing,
         boxSelect: current.boxSelect,
       });
     },
@@ -158,6 +174,16 @@ export function createUiStore(): UiStore {
         selection: current.selection,
         drag: current.drag,
         connect,
+        editing: current.editing,
+        boxSelect: current.boxSelect,
+      });
+    },
+    setEditing(id: Id | null) {
+      update({
+        selection: current.selection,
+        drag: current.drag,
+        connect: current.connect,
+        editing: id,
         boxSelect: current.boxSelect,
       });
     },
@@ -166,6 +192,7 @@ export function createUiStore(): UiStore {
         selection: current.selection,
         drag: current.drag,
         connect: current.connect,
+        editing: current.editing,
         boxSelect: rect,
       });
     },

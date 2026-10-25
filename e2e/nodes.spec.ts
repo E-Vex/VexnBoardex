@@ -141,6 +141,7 @@ test.describe('nodes @ 1280×720', () => {
         return sameColor(p, bg);
       })
       .toBe(false);
+    await page.keyboard.press('Escape'); // close the editor (T-020)
 
     // Space-drag from (400, 300) to (550, 380): a shift of (150, 80).
     await page.keyboard.down('Space');
@@ -201,6 +202,7 @@ test.describe('nodes @ 1280×720', () => {
         return run >= 196 && run <= 204;
       })
       .toBe(true);
+    await page.keyboard.press('Escape'); // close the editor (T-020)
 
     // Press Equal: 125% around the screen center.
     await page.keyboard.press('Equal');

@@ -62,6 +62,7 @@ test.describe('connect @ 1280×720', () => {
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
     // …card B at (700, 450) — screen rect 600–800, 390–510.
     await page.mouse.dblclick(700, 450);
+    await page.keyboard.press('Escape'); // close B's editor (T-020)
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
 
     // Reselect A (creating B took the selection).

@@ -60,13 +60,16 @@ async function dominantColor(page: Page): Promise<Rgba> {
 /**
  * Create a card by double-clicking at (300, 200) and wait until it is
  * painted: returns its fill color. The card occupies screen x 200–400,
- * y 140–260 and is selected.
+ * y 140–260 and is selected. T-020: double-click also opens the text
+ * editor on the new card — Escape closes it so canvas interactions work.
  */
 async function createCard(page: Page): Promise<Rgba> {
   await page.mouse.dblclick(300, 200);
   await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
   await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
   await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+  await page.keyboard.press('Escape'); // close the auto-opened editor (T-020)
+  await expect(page.locator('#vex-text-editor')).toBeHidden();
 
   const bg = await dominantColor(page);
   let fill: Rgba | null = null;
@@ -113,6 +116,7 @@ test.describe('select @ 1280×720', () => {
 
     // Card B at (460, 200): x 360–560 — overlaps A on x 360–400.
     await page.mouse.dblclick(460, 200);
+    await page.keyboard.press('Escape'); // close B's editor (T-020)
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
     await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
 
@@ -248,6 +252,8 @@ test.describe('select @ 1280×720', () => {
 
     // Backspace works the same way.
     await page.mouse.dblclick(300, 200);
+    await page.keyboard.press('Escape'); // close the editor (T-020)
+    await expect(page.locator('#vex-text-editor')).toBeHidden();
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
     await page.keyboard.press('Backspace');
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 0');
