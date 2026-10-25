@@ -23,6 +23,9 @@ import { renderBoard } from './view/renderer';
 import { createUiStore, pruneSelection } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import { exportFile, importFile, pickFile } from './io/file';
+import { createNodeAt } from './input/cardCommand';
+import { screenToWorld } from './view/camera';
+import type { NodeKind } from './core/types';
 
 // Initial camera: world (0, 0) centered in the viewport at zoom 1 (R6).
 const initialCamera = cameraCenteredOn(
@@ -355,6 +358,22 @@ function createToolbar(): void {
 
   makeBtn({ text: '↶ Undo', onClick: () => docStore.undo(), isDisabled: () => !docStore.canUndo() });
   makeBtn({ text: '↷ Redo', onClick: () => docStore.redo(), isDisabled: () => !docStore.canRedo() });
+
+  // M7 (T-019): create nodes of each kind at the viewport centre.
+  const addNode = (kind: NodeKind) => {
+    const { clientWidth, clientHeight } = host.canvas;
+    const world = screenToWorld(store.get(), {
+      x: clientWidth / 2,
+      y: clientHeight / 2,
+    });
+    const id = crypto.randomUUID();
+    docStore.dispatch(createNodeAt(kind, world, id));
+    uiStore.setSelection([id]);
+  };
+  makeBtn({ text: '＋ Text', onClick: () => addNode('text') });
+  makeBtn({ text: '＋ Sticky', onClick: () => addNode('sticky') });
+  makeBtn({ text: '＋ Card', onClick: () => addNode('card') });
+
   makeBtn({ text: 'Copy', onClick: copySelection, isDisabled: () => uiStore.get().selection.length === 0 });
   makeBtn({ text: 'Paste', onClick: pasteSelection, isDisabled: () => !clipboard || clipboard.nodes.length === 0 });
   makeBtn({ text: 'Duplicate', onClick: duplicateSelection, isDisabled: () => uiStore.get().selection.length === 0 });

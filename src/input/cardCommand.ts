@@ -11,15 +11,15 @@
 import type { Point } from '../core/geometry';
 import { hitTest } from '../core/hitTest';
 import { newNode } from '../core/nodeDefaults';
-import type { Command, Doc, Id } from '../core/types';
+import type { Command, Doc, Id, NodeKind } from '../core/types';
 
 /**
- * A `node.create` command for a card centred on `world` (R7):
+ * A `node.create` command for a node of `kind` centred on `world` (T-019):
  * `x = world.x − w/2`, `y = world.y − h/2`, with `w`/`h` from `newNode`.
  * The id comes from the caller (D-11).
  */
-export function createCardAt(world: Point, id: Id): Command {
-  const base = newNode(id, 'card', 0, 0);
+export function createNodeAt(kind: NodeKind, world: Point, id: Id): Command {
+  const base = newNode(id, kind, 0, 0);
   return {
     type: 'node.create',
     node: {
@@ -28,6 +28,15 @@ export function createCardAt(world: Point, id: Id): Command {
       y: world.y - base.h / 2,
     },
   };
+}
+
+/**
+ * A `node.create` command for a card centred on `world` (R7):
+ * `x = world.x − w/2`, `y = world.y − h/2`, with `w`/`h` from `newNode`.
+ * The id comes from the caller (D-11).
+ */
+export function createCardAt(world: Point, id: Id): Command {
+  return createNodeAt('card', world, id);
 }
 
 /**

@@ -92,5 +92,17 @@ export type Command =
   | { type: 'node.delete'; ids: Id[] }
   | { type: 'node.duplicate'; ids: Id[]; offsetX?: number; offsetY?: number; newIds: Id[]; newEdgeIds: Id[] }
   | { type: 'node.zOrder'; ids: Id[]; mode: 'front' | 'back' | 'forward' | 'backward' }
+  | { type: 'node.update'; ids: Id[]; patch: NodeContentPatch }
+  | { type: 'node.resize'; id: Id; x: number; y: number; w: number; h: number }
   | { type: 'edge.create'; edge: Edge }
   | { type: 'edge.delete'; ids: Id[] };
+
+/**
+ * The editable content fields of a node (T-019, M7): text, colour and tags.
+ * Geometry is edited through `node.resize` / `node.move`, never here.
+ */
+export interface NodeContentPatch {
+  text?: string;
+  color?: string;
+  tags?: string[];
+}

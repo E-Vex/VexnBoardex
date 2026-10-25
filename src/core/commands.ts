@@ -6,7 +6,7 @@
  * patch. IDs come from the caller (D-11).
  */
 
-import type { Command } from './types';
+import type { Command, NodeContentPatch } from './types';
 import type { Doc } from './types';
 import type { Patch } from './types';
 import type { Anchor, Edge, Id, Node } from './types';
@@ -193,6 +193,95 @@ function compileDelete(doc: Doc, ids: Id[]): Patch {
     edges,
     groups: {},
     order: { before: doc.order, after: afterOrder },
+  };
+}
+
+/**
+ * Compile `node.update` (T-019, M7): apply a content patch (text, colour,
+ * tags) to every listed node. Unknown ids throw; invalid patch values throw;
+ * a patch that changes nothing (or empty ids) compiles to an empty patch —
+ * one command, one undo step, for any number of nodes.
+ */
+function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
+  // Validate the patch shape first (commands are data — D-22).
+  if (patch.text !== undefined && !isString(patch.text)) {
+    throw new CommandError('node.update: patch.text is not a string');
+  }
+  if (patch.color !== undefined && !isString(patch.color)) {
+    throw new CommandError('node.update: patch.color is not a string');
+  }
+  if (patch.tags !== undefined && !isStringArray(patch.tags)) {
+    throw new CommandError('node.update: patch.tags is not an array of strings');
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`node.update: unknown id "${id}"`);
+    }
+  }
+
+  if (uniqueIds.length === 0) return emptyPatch();
+
+  const nodes: Patch['nodes'] = {};
+  for (const id of uniqueIds) {
+    const before = doc.nodes[id]!;
+    const after: Node = {
+      ...before,
+      ...(patch.text !== undefined ? { text: patch.text } : {}),
+      ...(patch.color !== undefined ? { color: patch.color } : {}),
+      ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+    };
+    // Skip nodes the patch does not actually change (deep-equal content).
+    if (
+      after.text === before.text &&
+      after.color === before.color &&
+      after.tags === before.tags
+    ) {
+      continue;
+    }
+    nodes[id] = { before, after };
+  }
+
+  if (Object.keys(nodes).length === 0) return emptyPatch();
+  return { nodes, edges: {}, groups: {} };
+}
+
+/**
+ * Compile `node.resize` (T-019, M7): set a node's geometry directly. The id
+ * must exist; x/y/w/h must be finite with w > 0 and h > 0 (D-24); a resize
+ * that changes nothing compiles to an empty patch.
+ */
+function compileResize(doc: Doc, id: Id, x: number, y: number, w: number, h: number): Patch {
+  if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+    throw new CommandError(`node.resize: unknown id "${id}"`);
+  }
+  if (!Number.isFinite(x)) throw new CommandError('node.resize: x is not finite');
+  if (!Number.isFinite(y)) throw new CommandError('node.resize: y is not finite');
+  if (!Number.isFinite(w) || w <= 0) {
+    throw new CommandError('node.resize: w is not finite or ≤ 0');
+  }
+  if (!Number.isFinite(h) || h <= 0) {
+    throw new CommandError('node.resize: h is not finite or ≤ 0');
+  }
+  const before = doc.nodes[id]!;
+  if (before.x === x && before.y === y && before.w === w && before.h === h) {
+    return emptyPatch();
+  }
+  return {
+    nodes: { [id]: { before, after: { ...before, x, y, w, h } } },
+    edges: {},
+    groups: {},
   };
 }
 
@@ -508,6 +597,10 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileDuplicate(doc, command.ids, command.offsetX, command.offsetY, command.newIds, command.newEdgeIds);
     case 'node.zOrder':
       return compileZOrder(doc, command.ids, command.mode);
+    case 'node.update':
+      return compileUpdate(doc, command.ids, command.patch);
+    case 'node.resize':
+      return compileResize(doc, command.id, command.x, command.y, command.w, command.h);
     case 'edge.create':
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':

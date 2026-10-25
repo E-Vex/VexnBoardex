@@ -675,3 +675,163 @@ describe('compileCommand — never mutates the doc', () => {
     expect(deepEqual(JSON.parse(JSON.stringify(doc)), before)).toBe(true);
   });
 });
+
+describe('node.update — content patch (T-019, M7)', () => {
+  it('changes text, color and tags of every listed node in one patch', () => {
+    const doc = docWith(node('a'), node('b'));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a', 'b'],
+      patch: { text: 'hello', color: '#ff0', tags: ['x'] },
+    });
+    const next = applyPatch(doc, patch);
+    for (const id of ['a', 'b']) {
+      expect(next.nodes[id]!.text).toBe('hello');
+      expect(next.nodes[id]!.color).toBe('#ff0');
+      expect(next.nodes[id]!.tags).toEqual(['x']);
+      // Geometry untouched.
+      expect(next.nodes[id]!.x).toBe(0);
+      expect(next.nodes[id]!.w).toBe(100);
+    }
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('applies only the provided fields', () => {
+    const doc = docWith(node('a', { text: 'keep', color: '#123' }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { color: '#abc' },
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a']!.text).toBe('keep');
+    expect(next.nodes['a']!.color).toBe('#abc');
+  });
+
+  it('a patch that changes nothing compiles to an empty patch', () => {
+    const doc = docWith(node('a', { text: 'same', tags: ['t'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { text: 'same' },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('empty ids compile to an empty patch', () => {
+    const doc = docWith(node('a'));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: [],
+      patch: { text: 'x' },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('unknown ids throw CommandError', () => {
+    const doc = docWith(node('a'));
+    expect(() =>
+      compileCommand(doc, { type: 'node.update', ids: ['ghost'], patch: { text: 'x' } }),
+    ).toThrow(CommandError);
+  });
+
+  it('invalid patch values throw CommandError', () => {
+    const doc = docWith(node('a'));
+    expect(() =>
+      compileCommand(doc, {
+        type: 'node.update',
+        ids: ['a'],
+        patch: { text: 42 as unknown as string },
+      }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, {
+        type: 'node.update',
+        ids: ['a'],
+        patch: { tags: 'nope' as unknown as string[] },
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('do → undo restores the exact original document', () => {
+    const doc = docWith(node('a', { text: 'one', color: '#111', tags: ['t1'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { text: 'two', color: '#222', tags: ['t2', 't3'] },
+    });
+    const next = applyPatch(doc, patch);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('duplicated ids are applied once (first occurrence wins)', () => {
+    const doc = docWith(node('a'));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a', 'a'],
+      patch: { text: 'x' },
+    });
+    expect(Object.keys(patch.nodes)).toEqual(['a']);
+  });
+});
+
+describe('node.resize — geometry (T-019, M7)', () => {
+  it('sets x, y, w and h', () => {
+    const doc = docWith(node('a', { x: 0, y: 0, w: 100, h: 50 }));
+    const patch = compileCommand(doc, {
+      type: 'node.resize',
+      id: 'a',
+      x: 10,
+      y: 20,
+      w: 300,
+      h: 150,
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a']).toMatchObject({ x: 10, y: 20, w: 300, h: 150 });
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('a no-change resize compiles to an empty patch', () => {
+    const doc = docWith(node('a', { x: 5, y: 6, w: 100, h: 50 }));
+    const patch = compileCommand(doc, {
+      type: 'node.resize',
+      id: 'a',
+      x: 5,
+      y: 6,
+      w: 100,
+      h: 50,
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('unknown id and non-finite or non-positive sizes throw', () => {
+    const doc = docWith(node('a'));
+    expect(() =>
+      compileCommand(doc, { type: 'node.resize', id: 'ghost', x: 0, y: 0, w: 1, h: 1 }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, { type: 'node.resize', id: 'a', x: NaN, y: 0, w: 1, h: 1 }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, { type: 'node.resize', id: 'a', x: 0, y: 0, w: 0, h: 1 }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, { type: 'node.resize', id: 'a', x: 0, y: 0, w: 1, h: -5 }),
+    ).toThrow(CommandError);
+  });
+
+  it('do → undo restores the exact original geometry', () => {
+    const doc = docWith(node('a', { x: 0, y: 0, w: 100, h: 50 }));
+    const patch = compileCommand(doc, {
+      type: 'node.resize',
+      id: 'a',
+      x: -10,
+      y: 40,
+      w: 12,
+      h: 34,
+    });
+    const undone = applyPatch(applyPatch(doc, patch), invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+});

@@ -90,7 +90,7 @@ function randomCommand(
 ): Command | null {
   const nodeIds = Object.keys(doc.nodes);
   const edgeIds = Object.keys(doc.edges);
-  const choice = randInt(rng, 0, 4);
+  const choice = randInt(rng, 0, 6);
   if (choice === 0) {
     // node.create with a fresh id
     const id = `new${counter.nextId++}`;
@@ -116,6 +116,29 @@ function randomCommand(
     // edge.delete a random non-empty subset of edge ids (T-009 R5)
     const subset = randSubset(rng, edgeIds);
     return { type: 'edge.delete', ids: subset };
+  } else if (choice === 5 && nodeIds.length > 0) {
+    // node.update: a random content patch over a random subset (T-019)
+    const subset = randSubset(rng, nodeIds);
+    return {
+      type: 'node.update',
+      ids: subset,
+      patch: {
+        text: `text-${randInt(rng, 0, 100)}`,
+        color: `#${randInt(rng, 0, 0xffffff).toString(16).padStart(6, '0')}`,
+        tags: Array.from({ length: randInt(rng, 0, 3) }, (_, i) => `tag-${i}`),
+      },
+    };
+  } else if (choice === 6 && nodeIds.length > 0) {
+    // node.resize: random valid geometry for one node (T-019)
+    const id = nodeIds[randInt(rng, 0, nodeIds.length - 1)]!;
+    return {
+      type: 'node.resize',
+      id,
+      x: (rng() * 2 - 1) * 500,
+      y: (rng() * 2 - 1) * 500,
+      w: randInt(rng, 1, 400),
+      h: randInt(rng, 1, 400),
+    };
   }
   return null;
 }

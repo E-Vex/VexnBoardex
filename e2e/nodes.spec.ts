@@ -241,3 +241,55 @@ test.describe('nodes @ 1280×720', () => {
     expect(sameColor(await canvasPixel(page, 300, 230), fill!)).toBe(true);
   });
 });
+
+test.describe('toolbar node creation @ 1280×720', () => {
+  test.use({ viewport: VIEWPORT });
+
+  test('6. ＋ Sticky creates a sticky note at the viewport centre (T-019)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 0');
+
+    await page.getByRole('button', { name: '＋ Sticky' }).click();
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+
+    // The sticky is centred on the viewport centre: a fill (not the board
+    // background) appears at the centre and its color differs from the bg.
+    const bg = await dominantColor(page);
+    let fill: Rgba | null = null;
+    await expect
+      .poll(async () => {
+        const p = await canvasPixel(page, 640, 360);
+        if (!sameColor(p, bg)) fill = p;
+        return sameColor(p, bg);
+      })
+      .toBe(false);
+
+    // The default sticky is 160×120: the fill extends ±80/±60 around centre.
+    expect(sameColor(await canvasPixel(page, 640 + 70, 360), fill!)).toBe(true);
+    expect(sameColor(await canvasPixel(page, 640, 360 + 50), fill!)).toBe(true);
+    // Outside the note: background again.
+    expect(sameColor(await canvasPixel(page, 640 + 100, 360), fill!)).toBe(false);
+  });
+
+  test('7. ＋ Text creates a fill-less text node (T-019)', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: '＋ Text' }).click();
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+
+    // A text node paints no fill: a point inside its rect (offset from the
+    // world-origin cross marker) stays the board color.
+    await page.waitForTimeout(200);
+    const bg = await dominantColor(page);
+    expect(sameColor(await canvasPixel(page, 648, 368), bg)).toBe(true);
+
+    // It is selected (selection outline) and still a real node.
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await page.keyboard.press('Delete');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 0');
+  });
+});

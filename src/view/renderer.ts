@@ -47,6 +47,9 @@ import {
   SELECTION_COLOR,
   SELECTION_OUTLINE_OFFSET,
   SELECTION_OUTLINE_WIDTH,
+  STICKY_CORNER_RADIUS,
+  TEXT_NODE_COLOR,
+  TEXT_NODE_CORNER_RADIUS,
   EDGE_COLOR,
   EDGE_WIDTH,
   ARROWHEAD_SIZE,
@@ -83,11 +86,19 @@ export interface Viewport {
 // (The node's bounding rect is built inline where culling needs it.)
 
 /**
- * Draw one node in world coordinates (R6): a rounded rectangle filled with
- * the node's colour, a 1-unit border, and its text laid out by `layoutText`
- * using `ctx.measureText` — left-aligned, from the top padding, limited to
- * the lines that fit the node height. Text is skipped entirely when
- * `FONT_SIZE × scale` is below the minimum on-screen size (text LOD).
+ * Draw one node in world coordinates (R6, T-019 kind-specific chrome):
+ *
+ * - `card`: rounded rectangle filled with the node colour, a 1-unit border,
+ *   and text (the classic look).
+ * - `sticky`: a stickier look — a slightly smaller corner radius, a subtle
+ *   drop shadow painted only beneath the note (screen-constant width).
+ * - `text`: no fill, no border — just light ink directly on the board.
+ * - `image`: filled placeholder rect (the bitmap arrives in T-023).
+ *
+ * Text is laid out by `layoutText` using `ctx.measureText` — left-aligned,
+ * from the top padding, limited to the lines that fit the node height.
+ * Text is skipped entirely when `FONT_SIZE × scale` is below the minimum
+ * on-screen size (text LOD).
  *
  * `dx`/`dy` (T-008 R5) shift the whole node by the drag preview offset in
  * world units — the document is not touched. `scale` is the camera zoom
@@ -104,20 +115,30 @@ function drawNode(
   const x = nx + dx;
   const y = ny + dy;
 
-  // Rounded rectangle via arcTo (R6), radius clamped to half the shorter side.
-  const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  ctx.fillStyle = node.color;
-  ctx.fill();
-  ctx.lineWidth = NODE_BORDER_WIDTH;
-  ctx.strokeStyle = NODE_BORDER_COLOR;
-  ctx.stroke();
+  if (node.kind !== 'text') {
+    // Sticky notes get a soft shadow under the note (screen-constant blur).
+    if (node.kind === 'sticky') {
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = node.color;
+      ctx.beginPath();
+      roundRect(ctx, x, y, w, h, STICKY_CORNER_RADIUS);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // Rounded rectangle via arcTo (R6), radius clamped to half the shorter side.
+      const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
+      ctx.beginPath();
+      roundRect(ctx, x, y, w, h, r);
+      ctx.fillStyle = node.color;
+      ctx.fill();
+      ctx.lineWidth = NODE_BORDER_WIDTH;
+      ctx.strokeStyle = NODE_BORDER_COLOR;
+      ctx.stroke();
+    }
+  }
 
   // Text LOD (R6): below the minimum on-screen size, skip the text.
   if (FONT_SIZE * scale < MIN_TEXT_SIZE) return;
@@ -134,7 +155,8 @@ function drawNode(
   ctx.font = `${FONT_SIZE}px ${FONT_STACK}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = NODE_TEXT_COLOR;
+  // Text nodes have no fill — their ink must read on the dark board (T-019).
+  ctx.fillStyle = node.kind === 'text' ? TEXT_NODE_COLOR : NODE_TEXT_COLOR;
 
   const lines = layoutText(
     node.text,
@@ -145,6 +167,23 @@ function drawNode(
   for (let i = 0; i < lines.length; i++) {
     ctx.fillText(lines[i]!, x + NODE_PADDING, y + NODE_PADDING + i * lineH);
   }
+}
+
+/** Trace a rounded rectangle path (no fill/stroke). */
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 // ── Selection outline (T-008 R5) ───────────────────────────────────────────
@@ -164,9 +203,10 @@ function drawSelectionOutline(
   w: number,
   h: number,
   scale: number,
+  radius = CORNER_RADIUS,
 ): void {
   const off = SELECTION_OUTLINE_OFFSET / scale;
-  const r = Math.min(CORNER_RADIUS, w / 2, h / 2) + off;
+  const r = Math.min(radius, w / 2, h / 2) + off;
   ctx.beginPath();
   ctx.moveTo(x - off + r, y - off);
   ctx.arcTo(x + w + off, y - off, x + w + off, y + h + off, r);
@@ -521,7 +561,19 @@ export function renderBoard(
     // in world space with /scale sizes — DPR- and zoom-safe (T-018).
     if (selected.has(id)) {
       drawHandles(ctx, { x, y, w: node.w, h: node.h }, m.scale);
-      drawSelectionOutline(ctx, x, y, node.w, node.h, m.scale);
+      drawSelectionOutline(
+        ctx,
+        x,
+        y,
+        node.w,
+        node.h,
+        m.scale,
+        node.kind === 'sticky'
+          ? STICKY_CORNER_RADIUS
+          : node.kind === 'text'
+            ? TEXT_NODE_CORNER_RADIUS
+            : CORNER_RADIUS,
+      );
     }
   }
   ctx.restore();

@@ -49,6 +49,18 @@ export const NODE_BORDER_WIDTH = 1;
 /** Node text colour — dark ink on the light node fills (core/nodeDefaults). */
 export const NODE_TEXT_COLOR = '#23262e';
 
+/**
+ * Text-node ink — light on the dark board (T-019): `text` nodes have no
+ * fill or border, so their text must read against the board background.
+ */
+export const TEXT_NODE_COLOR = '#e8e8ef';
+
+/** Sticky-note corner radius, in world units (T-019). */
+export const STICKY_CORNER_RADIUS = 4;
+
+/** Text-node corner radius, in world units (T-019). */
+export const TEXT_NODE_CORNER_RADIUS = 2;
+
 /** Node border colour — a translucent dark ink over the fill. */
 export const NODE_BORDER_COLOR = 'rgba(35, 38, 46, 0.35)';
 
