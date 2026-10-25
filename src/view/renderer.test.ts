@@ -324,6 +324,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       selection: ['a'],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -357,6 +358,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       selection: [],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -377,6 +379,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       selection: ['a'],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -401,6 +404,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
         selection: ['a'],
         drag: null,
         connect: null,
+        editing: null,
         boxSelect: null,
       });
 
@@ -423,6 +427,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       selection: ['off', 'on'],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -447,6 +452,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -473,6 +479,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       selection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -490,6 +497,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -510,6 +518,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       selection: ['a'],
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -575,6 +584,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       selection: [],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -598,6 +608,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -617,6 +628,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       selection: [],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -639,6 +651,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       selection: [],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
@@ -657,6 +670,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       selection: [],
       drag: null,
       connect: null,
+      editing: null,
       boxSelect: null,
     });
 
