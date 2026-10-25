@@ -7,6 +7,8 @@
  * - `setDrag` → `uiStore.setDrag`
  * - `dispatch`→ `docStore.dispatch` (I-03: the only mutation path)
  * - `setBoxSelect` → `uiStore.setBoxSelect` (for marquee preview)
+ * - `selectInRect` → resolves the marquee rect against the document and
+ *   sets the selection (T-017)
  *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
@@ -21,6 +23,8 @@
  */
 
 import { hitTest } from '../core/hitTest';
+import { rectsIntersect } from '../core/geometry';
+import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
@@ -75,8 +79,48 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
         case 'setBoxSelect':
           uiStore.setBoxSelect(effect.rect);
           break;
+        case 'selectInRect':
+          uiStore.setSelection(nodesIntersectingScreenRect(effect.rect));
+          break;
       }
     }
+  }
+
+  /**
+   * The ids of every node whose rect intersects a screen-space marquee
+   * rect, in `order` (bottom → top) — the box-select resolution (T-017).
+   * Pure w.r.t. the stores: reads the camera and the document once.
+   */
+  function nodesIntersectingScreenRect(
+    rect: { x: number; y: number; w: number; h: number },
+  ): Id[] {
+    const cam = cameraStore.get();
+    const topLeft = screenToWorld(cam, { x: rect.x, y: rect.y });
+    const bottomRight = screenToWorld(cam, {
+      x: rect.x + rect.w,
+      y: rect.y + rect.h,
+    });
+    const worldRect = {
+      x: Math.min(topLeft.x, bottomRight.x),
+      y: Math.min(topLeft.y, bottomRight.y),
+      w: Math.abs(bottomRight.x - topLeft.x),
+      h: Math.abs(bottomRight.y - topLeft.y),
+    };
+    const doc = docStore.get();
+    const ids: Id[] = [];
+    for (const id of doc.order) {
+      const node = doc.nodes[id];
+      if (node === undefined) continue; // defensive: order is a permutation
+      if (
+        rectsIntersect(
+          { x: node.x, y: node.y, w: node.w, h: node.h },
+          worldRect,
+        )
+      ) {
+        ids.push(id);
+      }
+    }
+    return ids;
   }
 
   /**
@@ -154,32 +198,6 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     if (state.mode === 'idle') return; // nobody is pressed on a node
     const { screen, world } = positions(e);
     feed({ type: 'pointerUp', pointerId: e.pointerId, screen, world });
-
-    // If box-select was active, finalize selection using the rect.
-    if (state.mode === 'boxSelecting' && state.boxSelectRect) {
-      const rect = state.boxSelectRect;
-      // Convert rect corners to world coordinates.
-      const topLeft = screenToWorld(cameraStore.get(), { x: rect.x, y: rect.y });
-      const bottomRight = screenToWorld(cameraStore.get(), { x: rect.x + rect.w, y: rect.y + rect.h });
-      const minX = Math.min(topLeft.x, bottomRight.x);
-      const maxX = Math.max(topLeft.x, bottomRight.x);
-      const minY = Math.min(topLeft.y, bottomRight.y);
-      const maxY = Math.max(topLeft.y, bottomRight.y);
-
-      const doc = docStore.get();
-      const selectedIds: string[] = [];
-      for (const [id, node] of Object.entries(doc.nodes)) {
-        const nodeRight = node.x + node.w;
-        const nodeBottom = node.y + node.h;
-        // Node intersects selection rect if its bounds overlap.
-        if (nodeRight >= minX && node.x <= maxX && nodeBottom >= minY && node.y <= maxY) {
-          selectedIds.push(id);
-        }
-      }
-      if (selectedIds.length > 0) {
-        uiStore.setSelection(selectedIds);
-      }
-    }
   }
 
   function onPointerCancel(e: PointerEvent): void {
