@@ -323,6 +323,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -355,6 +356,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: [],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -374,6 +376,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -397,6 +400,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       renderBoard(ctx, { width: 1280, height: 720 }, zc, docOf(node), {
         selection: ['a'],
         drag: null,
+        connect: null,
         boxSelect: null,
       });
 
@@ -418,6 +422,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(off, on), {
       selection: ['off', 'on'],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -441,6 +446,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      connect: null,
       boxSelect: null,
     });
 
@@ -466,6 +472,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      connect: null,
       boxSelect: null,
     });
 
@@ -482,6 +489,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      connect: null,
       boxSelect: null,
     });
 
@@ -501,6 +509,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
+      connect: null,
       boxSelect: null,
     });
 
@@ -565,6 +574,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -587,6 +597,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: ['a'],
       drag: { ids: ['a'], dx: 50, dy: 25 },
+      connect: null,
       boxSelect: null,
     });
 
@@ -605,6 +616,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -626,6 +638,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 
@@ -643,6 +656,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
       drag: null,
+      connect: null,
       boxSelect: null,
     });
 

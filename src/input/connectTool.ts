@@ -1,11 +1,12 @@
 /**
- * Connection tool state machine (T-011 R2) — pure, DOM-free (PLAN D-06).
+ * Connection tool state machine (T-011 R2, T-018) — pure, DOM-free (PLAN D-06).
  *
  * Implements the edge creation gesture:
  * - A left press (button 0) on a connection handle starts a connection.
- * - While connecting, only `setDrag` effects are produced (I-04: pointer-move
- *   never commits; the document is untouched). The preview is a line from the
- *   handle to the cursor.
+ * - While connecting, only `setConnect` effects are produced (I-04: pointer-move
+ *   never commits; the document is untouched). The preview is a dedicated
+ *   `ConnectPreview` (node + anchor + world endpoint) — never a node drag
+ *   (T-018: the two preview kinds are no longer conflated).
  * - Pointer-up on another node's handle (or body) completes the connection
  *   with an `edge.create` command (auto-anchors: from = pressed handle,
  *   to = 'auto' if released on body, or the specific handle if released on handle).
@@ -16,7 +17,7 @@
 import type { Point } from '../core/geometry';
 import type { Command, Id, Anchor, Edge } from '../core/types';
 import type { HitResult } from '../core/hitTest';
-import type { DragPreview } from '../view/uiStore';
+import type { ConnectPreview } from '../view/uiStore';
 
 /** The drag threshold in screen pixels (D-26): ≥ this distance starts a drag. */
 export const CONNECT_THRESHOLD = 4;
@@ -51,7 +52,7 @@ export type ConnectEvent =
 
 /** Effects the DOM glue applies (R2). */
 export type ConnectEffect =
-  | { type: 'setDrag'; drag: DragPreview | null }
+  | { type: 'setConnect'; preview: ConnectPreview | null }
   | { type: 'dispatch'; command: Command };
 
 /** Per-event context: the current document (for hit-testing on release). */
@@ -84,15 +85,12 @@ function dist(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/** The drag preview for the connection line from the handle to `world`. */
-function connectPreview(state: ConnectState, world: Point): DragPreview {
-  if (state.fromNode === null) return { ids: [], dx: 0, dy: 0 };
-  // The preview is not a node drag but we reuse DragPreview to draw a line.
-  // We encode the connection preview in dx/dy as the world endpoint.
+/** The connect preview for the line from the handle to `world` (T-018). */
+function connectPreview(state: ConnectState, world: Point): ConnectPreview {
   return {
-    ids: [state.fromNode],
-    dx: world.x,
-    dy: world.y,
+    fromNode: state.fromNode!,
+    fromAnchor: state.fromAnchor as 'top' | 'right' | 'bottom' | 'left',
+    to: { x: world.x, y: world.y },
   };
 }
 
@@ -149,7 +147,9 @@ export function reduceConnect(
       // Update the preview line endpoint.
       return {
         state,
-        effects: [{ type: 'setDrag', drag: connectPreview(state, event.world) }],
+        effects: [
+          { type: 'setConnect', preview: connectPreview(state, event.world) },
+        ],
       };
     }
 
@@ -191,7 +191,7 @@ export function reduceConnect(
           return {
             state: idle(),
             effects: [
-              { type: 'setDrag', drag: null },
+              { type: 'setConnect', preview: null },
               { type: 'dispatch', command: { type: 'edge.create', edge } },
             ],
           };
@@ -200,11 +200,11 @@ export function reduceConnect(
         // Cancel: no valid target.
         return {
           state: idle(),
-          effects: [{ type: 'setDrag', drag: null }],
+          effects: [{ type: 'setConnect', preview: null }],
         };
       }
 
-      return { state: idle(), effects: [{ type: 'setDrag', drag: null }] };
+      return { state: idle(), effects: [{ type: 'setConnect', preview: null }] };
     }
 
     case 'pointerCancel': {
@@ -212,7 +212,7 @@ export function reduceConnect(
       if (state.pointerId !== event.pointerId) return { state, effects: [] };
       return {
         state: idle(),
-        effects: [{ type: 'setDrag', drag: null }],
+        effects: [{ type: 'setConnect', preview: null }],
       };
     }
 
@@ -221,7 +221,7 @@ export function reduceConnect(
         if (state.mode === 'idle') return { state, effects: [] };
         return {
           state: idle(),
-          effects: [{ type: 'setDrag', drag: null }],
+          effects: [{ type: 'setConnect', preview: null }],
         };
       }
       // Any other key is ignored.
@@ -232,7 +232,7 @@ export function reduceConnect(
       if (state.mode === 'idle') return { state, effects: [] };
       return {
         state: idle(),
-        effects: [{ type: 'setDrag', drag: null }],
+        effects: [{ type: 'setConnect', preview: null }],
       };
     }
   }
