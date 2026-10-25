@@ -88,6 +88,9 @@ function compileCreate(doc: Doc, node: Node): Patch {
       `node.create: groupId "${node.groupId}" does not exist`,
     );
   }
+  if (node.src !== undefined && !isString(node.src)) {
+    throw new CommandError('node.create: src is not a string');
+  }
 
   return {
     nodes: { [node.id]: { after: node } },

@@ -139,6 +139,7 @@ export function coerceDoc(obj: unknown): Doc {
         color: typeof n.color === 'string' ? n.color : '#ffffff',
         tags: Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === 'string') : [],
         groupId: typeof n.groupId === 'string' ? n.groupId : undefined,
+        src: typeof n.src === 'string' ? n.src : undefined,
       };
     }
   }

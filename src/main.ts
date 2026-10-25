@@ -23,6 +23,7 @@ import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
+import { setImageLoadedCallback } from './view/imageCache';
 import { createUiStore, pruneSelection } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import { exportFile, importFile, pickFile } from './io/file';
@@ -353,6 +354,9 @@ function sendToBack(): void {
   docStore.dispatch({ type: 'node.zOrder', ids: selection, mode: 'back' });
 }
 
+// Images decode asynchronously: repaint when one finishes loading (T-023).
+setImageLoadedCallback(() => host.requestRender());
+
 // Toolbar for export/import + edit actions (T-13 R2, T-016).
 function createToolbar(): void {
   const toolbar = document.createElement('div');
@@ -403,6 +407,64 @@ function createToolbar(): void {
   makeBtn({ text: '＋ Text', onClick: () => addNode('text') });
   makeBtn({ text: '＋ Sticky', onClick: () => addNode('sticky') });
   makeBtn({ text: '＋ Card', onClick: () => addNode('card') });
+
+  // M7 (T-023): insert an image from a file — read as a data URL, sized to
+  // the image's aspect ratio (max 400 on the long side), created at the
+  // viewport centre like the other kinds.
+  const imageInput = document.createElement('input');
+  imageInput.id = 'vex-image-input';
+  imageInput.type = 'file';
+  imageInput.accept = 'image/*';
+  imageInput.style.display = 'none';
+  document.body.appendChild(imageInput);
+  imageInput.onchange = () => {
+    const file = imageInput.files?.[0];
+    imageInput.value = ''; // allow re-picking the same file
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result);
+      const probe = new Image();
+      probe.onload = () => {
+        const { clientWidth, clientHeight } = host.canvas;
+        const world = screenToWorld(store.get(), {
+          x: clientWidth / 2,
+          y: clientHeight / 2,
+        });
+        const maxSide = 400;
+        const scale = Math.min(
+          maxSide / probe.naturalWidth,
+          maxSide / probe.naturalHeight,
+          1,
+        );
+        const w = Math.max(40, probe.naturalWidth * scale);
+        const h = Math.max(40, probe.naturalHeight * scale);
+        const id = crypto.randomUUID();
+        docStore.dispatch({
+          type: 'node.create',
+          node: {
+            id,
+            kind: 'image',
+            x: world.x - w / 2,
+            y: world.y - h / 2,
+            w,
+            h,
+            text: '',
+            color: '#e5def2',
+            tags: [],
+            src,
+          },
+        });
+        uiStore.setSelection([id]);
+      };
+      probe.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+  makeBtn({
+    text: '＋ Image',
+    onClick: () => imageInput.click(),
+  });
 
   makeBtn({ text: 'Copy', onClick: copySelection, isDisabled: () => uiStore.get().selection.length === 0 });
   makeBtn({ text: 'Paste', onClick: pasteSelection, isDisabled: () => !clipboard || clipboard.nodes.length === 0 });

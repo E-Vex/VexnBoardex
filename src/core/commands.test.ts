@@ -835,3 +835,48 @@ describe('node.resize — geometry (T-019, M7)', () => {
     expect(deepEqual(undone, doc)).toBe(true);
   });
 });
+
+describe('node.create — image src field (T-023)', () => {
+  it('accepts an image node with a data-URL src', () => {
+    const doc = docWith();
+    const patch = compileCommand(doc, {
+      type: 'node.create',
+      node: node('img', { kind: 'image', src: 'data:image/png;base64,AAAA' }),
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['img']!.src).toBe('data:image/png;base64,AAAA');
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('rejects a non-string src', () => {
+    const doc = docWith();
+    expect(() =>
+      compileCommand(doc, {
+        type: 'node.create',
+        node: node('img', { kind: 'image', src: 42 as unknown as string }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('validateDoc flags a non-string src as bad-src', () => {
+    const bad = docWith(
+      node('img', { kind: 'image', src: true as unknown as string }),
+    );
+    const errors = validateDoc(bad);
+    expect(errors.some((e) => e.startsWith('bad-src:'))).toBe(true);
+  });
+
+  it('duplicate copies the src (the data URL is shared, immutable)', () => {
+    const doc = docWith(
+      node('img', { kind: 'image', src: 'data:image/png;base64,AAAA' }),
+    );
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['img'],
+      newIds: ['img2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['img2']!.src).toBe('data:image/png;base64,AAAA');
+  });
+});

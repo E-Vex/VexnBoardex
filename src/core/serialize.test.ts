@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyDoc } from './doc';
 import type { Doc } from './types';
-import { serializeDoc, deserializeDoc, FILE_VERSION } from './serialize';
+import { serializeDoc, deserializeDoc, coerceDoc, FILE_VERSION } from './serialize';
 
 function makeDoc(): Doc {
   const doc = emptyDoc();
@@ -167,5 +167,32 @@ describe('FILE_VERSION', () => {
   it('is a positive integer', () => {
     expect(Number.isInteger(FILE_VERSION)).toBe(true);
     expect(FILE_VERSION).toBeGreaterThan(0);
+  });
+});
+describe('serialize — image src field (T-023)', () => {
+  it('round-trips a data-URL src', () => {
+    const doc = emptyDoc();
+    doc.nodes['img'] = {
+      id: 'img', kind: 'image', x: 0, y: 0, w: 100, h: 100,
+      text: '', color: '#fff', tags: [], src: 'data:image/png;base64,AAAA',
+    };
+    doc.order = ['img'];
+    const json = serializeDoc(doc);
+    const back = deserializeDoc(json);
+    expect(back.envelope.doc.nodes['img']!.src).toBe('data:image/png;base64,AAAA');
+    expect(back.warnings).toEqual([]);
+  });
+
+  it('coerceDoc preserves a string src and drops a non-string one', () => {
+    const good = coerceDoc({
+      nodes: { a: { id: 'a', kind: 'image', x: 0, y: 0, w: 10, h: 10, text: '', color: '#fff', tags: [], src: 'data:x' } },
+      edges: {}, groups: {}, order: ['a'],
+    });
+    expect(good.nodes['a']!.src).toBe('data:x');
+    const bad = coerceDoc({
+      nodes: { a: { id: 'a', kind: 'image', x: 0, y: 0, w: 10, h: 10, text: '', color: '#fff', tags: [], src: 7 } },
+      edges: {}, groups: {}, order: ['a'],
+    });
+    expect(bad.nodes['a']!.src).toBeUndefined();
   });
 });
