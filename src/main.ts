@@ -17,6 +17,8 @@ import { attachSelectInput } from './input/selectInput';
 import { attachConnectInput } from './input/connectInput';
 import { createHud } from './ui/hud';
 import { createTextEditor } from './ui/textEditor';
+import { createInspector } from './ui/inspector';
+import { createTagBar } from './ui/tagBar';
 import { cameraCenteredOn } from './view/camera';
 import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
@@ -135,6 +137,12 @@ const textEditor = createTextEditor({
   docStore,
   uiStore,
 });
+
+// Inspector (colors, tags) and the tag filter bar (T-022). Every change is
+// one node.update command for the whole selection; the filter is pure UI
+// state — never saved, never in history (I-05).
+createInspector(docStore, uiStore);
+createTagBar(docStore, uiStore);
 
 // Select input: select, move and delete cards (T-008 R6). Space+left and
 // middle-button drags belong to panning, so the select tool stands down

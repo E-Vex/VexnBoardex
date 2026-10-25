@@ -477,6 +477,7 @@ export function renderBoard(
     connect: null,
     editing: null,
     resize: null,
+    tagFilter: [],
     boxSelect: null,
   },
 ): void {
@@ -592,6 +593,10 @@ export function renderBoard(
   const dragDy = drag !== null ? drag.dy : 0;
   // Resize handles exist only for a single selected node (T-021).
   const showResizeHandles = ui.selection.length === 1;
+  // Tag filter (T-022): nodes without an active tag are dimmed.
+  const dimming = ui.tagFilter.length > 0;
+  const matchesFilter = (node: Node): boolean =>
+    !dimming || node.tags.some((t) => ui.tagFilter.includes(t));
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const id of doc.order) {
@@ -617,14 +622,30 @@ export function renderBoard(
     if (!rectsIntersect({ x, y, w, h }, visible)) continue;
     // T-020: while the DOM overlay edits a node, its canvas text is skipped
     // (the overlay shows the text); the fill/border still paint beneath it.
-    drawNode(
-      ctx,
-      resized !== null ? { ...node, x, y, w, h } : node,
-      m.scale,
-      dx,
-      dy,
-      id !== ui.editing,
-    );
+    // T-022: dim the node when it does not carry an active tag filter; the
+    // selection chrome (outline, handles) stays at full strength.
+    if (dimming && !matchesFilter(node)) {
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      drawNode(
+        ctx,
+        resized !== null ? { ...node, x, y, w, h } : node,
+        m.scale,
+        dx,
+        dy,
+        id !== ui.editing,
+      );
+      ctx.restore();
+    } else {
+      drawNode(
+        ctx,
+        resized !== null ? { ...node, x, y, w, h } : node,
+        m.scale,
+        dx,
+        dy,
+        id !== ui.editing,
+      );
+    }
     // Draw connection handles on selected nodes (T-011). Handles are drawn
     // in world space with /scale sizes — DPR- and zoom-safe (T-018).
     if (selected.has(id)) {
