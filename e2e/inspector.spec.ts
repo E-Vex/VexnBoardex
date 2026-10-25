@@ -133,9 +133,15 @@ test.describe('inspector @ 1280×720', () => {
     // A (tagged) keeps its full fill; B (untagged) dims: the dimmed pixel is
     // a blend of fill and background — neither the full fill nor the bg.
     expect(sameColor(await canvasPixel(page, 300, 230), fillA)).toBe(true);
-    const dimmed = await canvasPixel(page, 700, 480);
-    expect(sameColor(dimmed, fillB!)).toBe(false);
-    expect(sameColor(dimmed, bg)).toBe(false);
+    let dimmed: Rgba | null = null;
+    await expect
+      .poll(async () => {
+        const p = await canvasPixel(page, 700, 480);
+        if (!sameColor(p, fillB!)) dimmed = p;
+        return sameColor(p, fillB!);
+      })
+      .toBe(false);
+    expect(sameColor(dimmed!, bg)).toBe(false);
 
     // Clear the filter: B returns to full strength.
     await page.locator('[data-testid="filter-clear"]').click();
