@@ -56,7 +56,7 @@ export interface ResizePreview {
 }
 
 /** The UI state layer (D-25): selection ids, the active previews, the node
- * being text-edited and the box-select rect. */
+ * being text-edited, the active tag filter and the box-select rect. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
@@ -65,6 +65,9 @@ export interface UiState {
   editing: Id | null;
   /** A resize gesture preview (T-021). */
   resize: ResizePreview | null;
+  /** Active tag filter chips (T-022): nodes without one of these tags are
+   * dimmed by the renderer. UI-only — never saved (I-05). */
+  tagFilter: string[];
   boxSelect: BoxSelectRect | null;
 }
 
@@ -81,6 +84,8 @@ export interface UiStore {
   setEditing(id: Id | null): void;
   /** Replace the resize preview (null = no gesture). No notification when equal. */
   setResize(resize: ResizePreview | null): void;
+  /** Replace the active tag filter. No notification when equal. */
+  setTagFilter(tags: string[]): void;
   /** Replace the box-select rect (null = no box-select). No notification when equal. */
   setBoxSelect(rect: BoxSelectRect | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
@@ -134,6 +139,7 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameConnect(a.connect, b.connect) &&
     a.editing === b.editing &&
     sameResize(a.resize, b.resize) &&
+    sameIds(a.tagFilter, b.tagFilter) &&
     sameBoxSelect(a.boxSelect, b.boxSelect)
   );
 }
@@ -157,6 +163,7 @@ export function createUiStore(): UiStore {
     connect: null,
     editing: null,
     resize: null,
+    tagFilter: [],
     boxSelect: null,
   };
   const subscribers = new Set<(state: UiState) => void>();
@@ -189,6 +196,9 @@ export function createUiStore(): UiStore {
     },
     setResize(resize: ResizePreview | null) {
       patch({ resize });
+    },
+    setTagFilter(tags: string[]) {
+      patch({ tagFilter: tags });
     },
     setBoxSelect(rect: BoxSelectRect | null) {
       patch({ boxSelect: rect });

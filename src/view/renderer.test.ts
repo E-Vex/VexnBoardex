@@ -326,6 +326,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -370,6 +371,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -392,6 +394,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -418,6 +421,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
         connect: null,
         editing: null,
         resize: null,
+        tagFilter: [],
         boxSelect: null,
       });
 
@@ -442,6 +446,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -468,6 +473,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -496,6 +502,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -515,6 +522,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -537,6 +545,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -604,6 +613,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -629,6 +639,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -650,6 +661,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -674,6 +686,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 
@@ -694,6 +707,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
 

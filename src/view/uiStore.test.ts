@@ -29,7 +29,7 @@ function docOf(...ids: string[]): Doc {
 describe('createUiStore — initial state (R3)', () => {
   it('starts with an empty selection and no drag', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, boxSelect: null });
+    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null });
   });
 });
 
@@ -47,6 +47,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
   });
@@ -89,6 +90,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       connect: null,
       editing: null,
       resize: null,
+      tagFilter: [],
       boxSelect: null,
     });
   });
@@ -148,7 +150,7 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, boxSelect: null });
+    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
@@ -224,5 +226,37 @@ describe('setEditing — the node being text-edited (T-020)', () => {
     expect(store.get().selection).toEqual(['a', 'b']);
     expect(store.get().drag).toEqual({ ids: ['a'], dx: 1, dy: 2 });
     expect(store.get().editing).toBe('a');
+  });
+});
+
+describe('setTagFilter — the active tag filter (T-022)', () => {
+  it('stores the filter and notifies', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setTagFilter(['idea']);
+    expect(store.get().tagFilter).toEqual(['idea']);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('the same filter content does not notify again', () => {
+    const store = createUiStore();
+    store.setTagFilter(['a', 'b']);
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setTagFilter(['a', 'b']);
+    expect(fn).not.toHaveBeenCalled();
+    store.setTagFilter(['b', 'a']); // order matters — a different filter
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('clearing back to [] notifies', () => {
+    const store = createUiStore();
+    store.setTagFilter(['x']);
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setTagFilter([]);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(store.get().tagFilter).toEqual([]);
   });
 });
