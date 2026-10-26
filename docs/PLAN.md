@@ -1,6 +1,6 @@
 # VexBoard — Project Plan
 
-> Status: v1.2 · Updated 2026-10-10 (M1 closed) · Owner of this file: **Planner**
+> Status: v1.3 · Updated 2026-10-26 (M7 closed) · Owner of this file: **Planner**
 > This file is the single source of truth for architecture, decisions and workflow.
 > The implementer does not edit it. Changes come from the Planner only.
 
@@ -305,23 +305,41 @@ Repo, toolchain, enforced layer boundaries, a canvas that fills the window.
 
 *Done when:* nodes stay visually fixed in the world through any pan/zoom, and a drag is one document change.
 
+**Status: closed.**
+
 ### M3 — Edges
 Connect by dragging from a handle, auto-anchors, arrowheads, cascade delete (I-09).
 *Done when:* moving a node moves its arrows at every zoom level.
+
+**Status: closed.** (T-009–T-011)
 
 ### M4 — Persistence → **MVP complete**
 JSON export/import, autosave (debounced, IndexedDB), `version` field, migration scaffolding, committed old-version fixtures.
 *Done when:* save → reload → deep-equal document; an old fixture loads correctly.
 
+**Status: closed.** (T-012–T-014; import-apply + startup autosave-restore landed in T-018)
+
 ### M5 — Undo / Redo
 History stack, coalescing, transactions (multi-node move = one step), shortcuts.
 *Done when:* for every command type, `do → undo` gives the exact original document.
 
+**Status: closed.** (T-015; coalescing restricted to same-node moves in T-018)
+
 ### M6 — Selection power
 Shift-click, box-select, group move, copy / paste / duplicate (new IDs; edges kept only between copied nodes), z-order, keyboard shortcuts (Delete, Ctrl+Z/Y/C/V/A, arrow-key nudge).
 
+**Status: closed.** (T-016; box-select machine repaired and group move completed in T-017)
+
 ### M7 — Rich content
 Resize handles, in-place text editing (DOM overlay), sticky notes and cards, colors, tags with filtering, images, groups/frames.
+
+**Status: closed.**
+- **T-019** `node.update` (text/color/tags, one command for a multi-selection) + `node.resize`; kind-specific rendering (text/sticky/card); toolbar ＋ Text/Sticky/Card
+- **T-020** In-place text editing: textarea overlay positioned/scaled from the camera (I-10); one `node.update` per commit; Enter/F2/double-click open it
+- **T-021** Resize handles: corner squares on the single selection; preview-only gesture (I-04); ONE `node.resize` per drag; min size 20
+- **T-022** Colors + tags: inspector swatches and tag editor; tag filter bar dims non-matching nodes (pure UI state)
+- **T-023** Images: optional `src` (data URL), image cache, aspect-correct insert, placeholder until decode
+- **T-024** Groups/frames: `group.assign`/`group.unassign` (empty-group cascade like I-09); frames render beneath edges; group drag + frame click select
 
 ### M8 — Export
 PNG (offscreen render of content bounds at 2×, with padding), JSON; SVG optional.
@@ -379,14 +397,32 @@ Maintained by the Planner.
 | T-003 | Pure camera math | Done (PR #5) |
 | T-004 | Grid, renderer, HUD | Done (PR #6) |
 | T-005 | Pan and zoom input | Done (PR #7) |
-| T-006 | Document model, patches, commands, store (core) | **Next — brief issued** |
-| T-007 | Render nodes + create | Planned |
-| T-008 | Select, move, delete + hit-testing | Planned |
+| T-006 | Document model, patches, commands, store (core) | Done (PR #8) |
+| T-007 | Render nodes + create | Done (PR #9) |
+| T-008 | Select, move, delete + hit-testing | Done (PR #10) |
+| T-009 | Edge core (nodeRect, anchorPoint, edgeEndpoints) | Done (PR #11) |
+| T-010 | Edge rendering | Done (PR #12) |
+| T-011 | Connection tool | Done (PR #13) |
+| T-012 | Serialization + migrations | Done (PR #14) |
+| T-013 | IO layer (export/import, autosave) | Done (PR #15) |
+| T-014 | Migration fixtures | Done (PR #16) |
+| T-015 | Undo/redo | Done (PR #17) |
+| T-016 | Selection power | Done (PR #18) |
+| T-017 | Fix: box-select machine, marquee finalization, group move | Done (PR #19) |
+| T-018 | Fix: connect preview, DPR-safe handles, import applies doc, autosave restore | Done (PR #20) |
+| T-019 | M7: node.update/node.resize, node kinds, toolbar creation | Done (PR #21) |
+| T-020 | M7: in-place text editing (DOM overlay) | Done (PR #22) |
+| T-021 | M7: resize handles | Done (PR #23) |
+| T-022 | M7: colors + tags with filtering | Done (PR #24) |
+| T-023 | M7: images | Done (PR #25) |
+| T-024 | M7: groups/frames | Done (PR #26) |
+| T-025 | Plan update: record M7 closure | Done |
 
 ---
 
 ## 10. Changelog
 
+- **v1.3** (2026-10-26, M7 closed): rich content — `node.update`/`node.resize` commands and kind-specific rendering (T-019); in-place text editing via a camera-derived textarea overlay (T-020); corner resize handles with preview-only gestures (T-021); colors, tags and tag filtering through the inspector and filter bar (T-022); image nodes with data-URL src (T-023); groups/frames with same-patch membership and empty-group cascades (T-024). Repair release alongside: box-select machine un-stuck, working marquees, multi-selection group move (T-017); connect-preview separation, DPR-safe handles, import-apply and autosave-restore (T-018).
 - **v1.2** (2026-10-10, M1 closed): input conventions, camera startup and store (D-19, D-20); document-model decisions (D-21 to D-24) and the Core API (section 4); workflow rules 12–13 (head SHA in reports, no silent force-push, quota discipline); property tests, layer matrix test and black-box e2e in the testing strategy; M1 closed; M2 sliced; task board updated.
 - **v1.1** (2026-10-09, M0 closed): Node 24 pinned (D-03); Playwright black-box rule (D-04); tooling versions, CI and camera purity decisions (D-16 to D-18); camera API (section 4); new workflow rules 7–11 (evidence format, branches and merging, verification experiments, secrets, `AGENTS.md` cap); CI added to testing strategy and risks; M0 closed; task board updated.
 - **v1.0** (2026-10-09): initial plan.
