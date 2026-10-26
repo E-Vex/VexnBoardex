@@ -22,7 +22,12 @@
  * back.
  */
 
-import { hitTestWithHandles, hitTestResizeHandles } from '../core/hitTest';
+import {
+  hitTestWithHandles,
+  hitTestResizeHandles,
+  groupMembersOf,
+  groupFrameAt,
+} from '../core/hitTest';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
@@ -206,6 +211,23 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get(), selection);
     if (hit !== null && hit.type === 'handle') return;
     const hitId = hit !== null ? hit.id : null;
+    if (hitId === null && !e.shiftKey) {
+      // A press on empty space inside a group FRAME selects all its members
+      // (T-024) instead of starting a marquee. Dragging any member afterwards
+      // moves the whole group (the machine unions the group's ids).
+      const frameGroup = groupFrameAt(docStore.get(), world);
+      if (frameGroup !== null) {
+        const doc = docStore.get();
+        const members: Id[] = [];
+        for (const id of doc.order) {
+          if (doc.nodes[id]?.groupId === frameGroup) members.push(id);
+        }
+        if (members.length > 0) {
+          uiStore.setSelection(members);
+          return;
+        }
+      }
+    }
     feed({
       type: 'pointerDown',
       button: e.button,
@@ -215,6 +237,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       hitId,
       shiftKey: e.shiftKey,
       resize: null,
+      groupIds: hitId !== null ? groupMembersOf(docStore.get(), hitId) : [],
     });
   }
 

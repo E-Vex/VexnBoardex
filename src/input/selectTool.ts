@@ -78,6 +78,9 @@ export type SelectEvent =
       /** A resize handle under the press (T-021): its node, corner and the
        * node's current rect. Present only for the single selected node. */
       resize?: { id: Id; corner: ResizeCorner; rect: { x: number; y: number; w: number; h: number } } | null;
+      /** The members of the pressed node's group, including itself (T-024):
+       * dragging a group member drags the whole group. [] when ungrouped. */
+      groupIds?: Id[];
     }
   | { type: 'pointerMove'; pointerId: number; screen: Point; world: Point }
   | { type: 'pointerUp'; pointerId: number; screen: Point; world: Point }
@@ -178,6 +181,20 @@ export function resizeRect(
   return { x, y, w, h };
 }
 
+/** The union of two id lists, order-preserving (first occurrence wins). */
+function unionIds(a: Id[], b: Id[]): Id[] {
+  if (b.length === 0) return a;
+  const seen = new Set<Id>(a);
+  const out = [...a];
+  for (const id of b) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
 /** The marquee rect spanned by two screen points, normalised to positive w/h. */
 function marqueeRect(
   a: Point,
@@ -250,7 +267,9 @@ export function reduce(
       if (event.hitId !== null) {
         // Press on a node: shift+click toggles, otherwise select (or keep selected)
         // and start a possible drag (D-26). When the pressed node belongs to
-        // the selection, the whole selection drags together (T-017).
+        // the selection, the whole selection drags together (T-017) — and a
+        // group member always drags its whole group along (T-024).
+        const groupIds = event.groupIds ?? [];
         const effects: SelectEffect[] = [];
         let dragIds: Id[];
         if (event.shiftKey) {
@@ -259,16 +278,17 @@ export function reduce(
             ? ctx.selection.filter((id) => id !== event.hitId)
             : [...ctx.selection, event.hitId];
           effects.push({ type: 'select', ids: newSelection });
-          // The toggle has taken effect: drag what the selection will be.
+          // The toggle has taken effect: drag what the selection will be,
+          // plus the pressed node's group.
           dragIds = newSelection.includes(event.hitId)
-            ? newSelection
-            : [event.hitId];
+            ? unionIds(newSelection, groupIds)
+            : unionIds([event.hitId], groupIds);
         } else if (ctx.selection.includes(event.hitId)) {
-          dragIds = [...ctx.selection];
+          dragIds = unionIds([...ctx.selection], groupIds);
         } else {
           // Select only this node (replacing selection)
           effects.push({ type: 'select', ids: [event.hitId] });
-          dragIds = [event.hitId];
+          dragIds = unionIds([event.hitId], groupIds);
         }
         return {
           state: {

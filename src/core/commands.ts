@@ -188,13 +188,30 @@ function compileDelete(doc: Doc, ids: Id[]): Patch {
     }
   }
 
+  // Groups left with no members are deleted in the same patch (T-024:
+  // I-09-style cascade — one undo restores the nodes, their edges AND the
+  // group). Only groups that are actually losing members in THIS delete.
+  const groups: Patch['groups'] = {};
+  for (const [groupId, group] of Object.entries(doc.groups)) {
+    const hadDeletedMember = Object.values(doc.nodes).some(
+      (n) => n.groupId === groupId && deleteSet.has(n.id),
+    );
+    if (!hadDeletedMember) continue;
+    const stillMember = Object.values(doc.nodes).some(
+      (n) => n.groupId === groupId && !deleteSet.has(n.id),
+    );
+    if (!stillMember) {
+      groups[groupId] = { before: group };
+    }
+  }
+
   // Filter order: keep ids not in the delete set.
   const afterOrder = doc.order.filter((id) => !deleteSet.has(id));
 
   return {
     nodes,
     edges,
-    groups: {},
+    groups,
     order: { before: doc.order, after: afterOrder },
   };
 }
@@ -286,6 +303,120 @@ function compileResize(doc: Doc, id: Id, x: number, y: number, w: number, h: num
     edges: {},
     groups: {},
   };
+}
+
+/**
+ * Compile `group.assign` (T-024, M7): create the group and set `groupId` on
+ * every listed node — one patch, so one undo removes the frame and every
+ * membership. Unknown ids throw; an empty group id throws; re-assigning a
+ * node already in this group is a no-op for that node. Nodes already in a
+ * DIFFERENT group are moved to this one.
+ */
+function compileGroupAssign(
+  doc: Doc,
+  groupId: Id,
+  name: string,
+  ids: Id[],
+): Patch {
+  if (groupId === '') {
+    throw new CommandError('group.assign: groupId is empty');
+  }
+  if (Object.prototype.hasOwnProperty.call(doc.groups, groupId)) {
+    throw new CommandError(`group.assign: group "${groupId}" already exists`);
+  }
+  if (!isString(name)) {
+    throw new CommandError('group.assign: name is not a string');
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`group.assign: unknown id "${id}"`);
+    }
+  }
+
+  const nodes: Patch['nodes'] = {};
+  for (const id of uniqueIds) {
+    const before = doc.nodes[id]!;
+    if (before.groupId === groupId) continue; // already a member
+    nodes[id] = { before, after: { ...before, groupId } };
+  }
+
+  // No new members and the group does not exist yet: nothing happens when
+  // the id list was empty — creating an empty frame is not a change the
+  // document can represent (a group with no members is invisible but valid;
+  // keep it out of the patch unless at least one node joins).
+  if (Object.keys(nodes).length === 0) {
+    return emptyPatch();
+  }
+
+  return {
+    nodes,
+    edges: {},
+    groups: { [groupId]: { after: { id: groupId, name } } },
+  };
+}
+
+/**
+ * Compile `group.unassign` (T-024, M7): clear `groupId` on the listed nodes.
+ * Groups left with no members are deleted in the SAME patch (I-09-style
+ * cascade: one undo restores the memberships and the empty group).
+ */
+function compileGroupUnassign(doc: Doc, ids: Id[]): Patch {
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`group.unassign: unknown id "${id}"`);
+    }
+  }
+
+  const nodes: Patch['nodes'] = {};
+  const touchedGroups = new Set<Id>();
+  for (const id of uniqueIds) {
+    const before = doc.nodes[id]!;
+    if (before.groupId === undefined) continue;
+    const { groupId, ...rest } = before;
+    nodes[id] = { before, after: rest };
+    touchedGroups.add(groupId);
+  }
+
+  if (Object.keys(nodes).length === 0) {
+    return emptyPatch();
+  }
+
+  // Delete groups that now have no members left.
+  const groups: Patch['groups'] = {};
+  const removed = new Set(uniqueIds);
+  for (const groupId of touchedGroups) {
+    const stillMember = Object.values(doc.nodes).some(
+      (n) => n.groupId === groupId && !removed.has(n.id),
+    );
+    if (!stillMember) {
+      groups[groupId] = { before: doc.groups[groupId]! };
+    }
+  }
+
+  return { nodes, edges: {}, groups };
 }
 
 /**
@@ -604,6 +735,10 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileUpdate(doc, command.ids, command.patch);
     case 'node.resize':
       return compileResize(doc, command.id, command.x, command.y, command.w, command.h);
+    case 'group.assign':
+      return compileGroupAssign(doc, command.groupId, command.name, command.ids);
+    case 'group.unassign':
+      return compileGroupUnassign(doc, command.ids);
     case 'edge.create':
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':

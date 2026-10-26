@@ -370,6 +370,7 @@ function createToolbar(): void {
     z-index: 100;
     font-family: system-ui, sans-serif;
     flex-wrap: wrap;
+    max-width: calc(100vw - 280px);
   `;
 
   type ButtonConfig = {
@@ -464,6 +465,37 @@ function createToolbar(): void {
   makeBtn({
     text: '＋ Image',
     onClick: () => imageInput.click(),
+  });
+
+  makeBtn({
+    text: 'Group',
+    // Group the selection into one frame (T-024).
+    onClick: () => {
+      const selection = uiStore.get().selection;
+      if (selection.length === 0) return;
+      const name = `Group ${docStore.get() ? Object.keys(docStore.get().groups).length + 1 : 1}`;
+      docStore.dispatch({
+        type: 'group.assign',
+        groupId: crypto.randomUUID(),
+        name,
+        ids: [...selection],
+      });
+    },
+    isDisabled: () => uiStore.get().selection.length === 0,
+  });
+  makeBtn({
+    text: 'Ungroup',
+    // Remove every selected node from its group (T-024); groups left empty
+    // are deleted in the same command.
+    onClick: () => {
+      const selection = uiStore.get().selection;
+      if (selection.length === 0) return;
+      docStore.dispatch({ type: 'group.unassign', ids: [...selection] });
+    },
+    isDisabled: () => {
+      const doc = docStore.get();
+      return !uiStore.get().selection.some((id) => doc.nodes[id]?.groupId !== undefined);
+    },
   });
 
   makeBtn({ text: 'Copy', onClick: copySelection, isDisabled: () => uiStore.get().selection.length === 0 });
