@@ -22,6 +22,7 @@
 import type { Doc, Node, Edge } from '../core/types';
 import { rectContains, rectsIntersect } from '../core/geometry';
 import { edgeEndpoints, nodeRect, anchorPoint } from '../core/edgeGeometry';
+import { groupFrameRect } from '../core/hitTest';
 import {
   type Camera,
   cameraToMatrix,
@@ -597,14 +598,47 @@ export function renderBoard(
     }
     drawEdge(ctx, edge, doc, m.scale, dragPreview);
   }
+  ctx.restore();
+
+  // 3b-1. Group frames (T-024) — translucent labeled rects around each
+  // group's members, beneath the edges and nodes. Own save/transform: never
+  // nested inside another world transform (a nested transform would apply
+  // the camera twice).
+  ctx.save();
+  ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
+  for (const [groupId, group] of Object.entries(doc.groups)) {
+    const rect = groupFrameRect(doc, groupId);
+    if (rect === null) continue;
+    // A very subtle amber wash + a thin amber border, in world units (the
+    // frame belongs to the content; it zooms with it).
+    ctx.beginPath();
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
+    ctx.fillStyle = 'rgba(245, 166, 35, 0.05)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(245, 166, 35, 0.55)';
+    ctx.setLineDash([8, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // The group's name, just above the frame's top-left corner.
+    if (FONT_SIZE * m.scale >= MIN_TEXT_SIZE) {
+      ctx.font = `600 14px ${FONT_STACK}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = 'rgba(245, 166, 35, 0.9)';
+      ctx.fillText(group.name, rect.x + 4, rect.y - 4);
+    }
+  }
+  ctx.restore();
 
   // 3c. Connection preview (T-011, T-018) — drawn between edges and nodes,
   // from the dedicated `ui.connect` preview (never from a node drag).
   if (ui.connect !== null) {
+    ctx.save();
+    ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
     drawConnectPreview(ctx, doc, ui.connect, m.scale);
+    ctx.restore();
   }
-
-  ctx.restore();
 
   // 4. Nodes, in doc.order (bottom → top), in world coordinates through the
   // camera transform (I-02: the transform comes from cameraToMatrix only).

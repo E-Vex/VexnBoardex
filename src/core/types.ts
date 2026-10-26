@@ -97,6 +97,8 @@ export type Command =
   | { type: 'node.zOrder'; ids: Id[]; mode: 'front' | 'back' | 'forward' | 'backward' }
   | { type: 'node.update'; ids: Id[]; patch: NodeContentPatch }
   | { type: 'node.resize'; id: Id; x: number; y: number; w: number; h: number }
+  | { type: 'group.assign'; groupId: Id; name: string; ids: Id[] }
+  | { type: 'group.unassign'; ids: Id[] }
   | { type: 'edge.create'; edge: Edge }
   | { type: 'edge.delete'; ids: Id[] };
 

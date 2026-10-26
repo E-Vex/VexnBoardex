@@ -29,6 +29,69 @@ export type HitResult =
 /** The corners a resize handle can sit on (T-021). */
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
+/** The padding around a group's bounding box, in world units (T-024). */
+export const GROUP_FRAME_PADDING = 16;
+
+/**
+ * The ids of every node that belongs to `nodeId`'s group (including the
+ * node itself); [] when the node is ungrouped (T-024). Pure.
+ */
+export function groupMembersOf(doc: Doc, nodeId: Id): Id[] {
+  const node = doc.nodes[nodeId];
+  if (node === undefined || node.groupId === undefined) return [];
+  const members: Id[] = [];
+  for (const id of doc.order) {
+    const n = doc.nodes[id];
+    if (n !== undefined && n.groupId === node.groupId) {
+      members.push(id);
+    }
+  }
+  return members;
+}
+
+/**
+ * The group whose frame (its members' bounding box + GROUP_FRAME_PADDING)
+ * contains `point` — the frame click target (T-024). A point inside any
+ * NODE never matches here: callers check `hitTest` first. Groups are
+ * checked in `Object.values` insertion order; the last hit wins.
+ */
+export function groupFrameAt(doc: Doc, point: Point): Id | null {
+  let hit: Id | null = null;
+  for (const [groupId] of Object.entries(doc.groups)) {
+    const rect = groupFrameRect(doc, groupId);
+    if (rect !== null && rectContains(rect, point)) {
+      hit = groupId;
+    }
+  }
+  return hit;
+}
+
+/** The frame rect of a group: its members' bbox + padding, or null when it
+ * has no members (T-024). Pure. */
+export function groupFrameRect(
+  doc: Doc,
+  groupId: Id,
+): { x: number; y: number; w: number; h: number } | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of Object.values(doc.nodes)) {
+    if (node.groupId !== groupId) continue;
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x + node.w);
+    maxY = Math.max(maxY, node.y + node.h);
+  }
+  if (!Number.isFinite(minX)) return null; // no members
+  return {
+    x: minX - GROUP_FRAME_PADDING,
+    y: minY - GROUP_FRAME_PADDING,
+    w: maxX - minX + GROUP_FRAME_PADDING * 2,
+    h: maxY - minY + GROUP_FRAME_PADDING * 2,
+  };
+}
+
 /**
  * The id of the top-most node whose rect contains `point`, or `null` when no
  * node does (R1). Later entries in `doc.order` win: they are drawn on top

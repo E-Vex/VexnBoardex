@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Command, Doc, Edge, EdgeEndpoint, Node } from './types';
 import { emptyDoc, validateDoc } from './doc';
+import { GROUP_FRAME_PADDING, groupFrameRect, groupMembersOf, groupFrameAt } from './hitTest';
 import { deepEqual } from './deepEqual';
 import { applyPatch, invertPatch, isEmptyPatch } from './patch';
 import { CommandError, compileCommand } from './commands';
@@ -343,12 +344,23 @@ describe('node.delete — removes nodes, order entries and incident edges', () =
     expect(patch.nodes.n1!.before).toEqual(n);
   });
 
-  it('nodes in groups are unaffected (only edges touching deleted nodes)', () => {
+  it('deleting a group\'s last member deletes the group in the same patch (T-024)', () => {
     const doc = docWith(node('n1'), node('n2'));
     doc.groups = { g1: { id: 'g1', name: 'g' } };
     doc.nodes.n1!.groupId = 'g1';
     const patch = compileCommand(doc, { type: 'node.delete', ids: ['n1'] });
-    // Group is not touched.
+    expect(patch.groups).toEqual({ g1: { before: { id: 'g1', name: 'g' } } });
+    // One undo restores the node AND the group.
+    const undone = applyPatch(applyPatch(doc, patch), invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('a group with a remaining member is untouched by a delete (T-024)', () => {
+    const doc = docWith(node('n1'), node('n2'), node('n3'));
+    doc.groups = { g1: { id: 'g1', name: 'g' } };
+    doc.nodes.n1!.groupId = 'g1';
+    doc.nodes.n2!.groupId = 'g1';
+    const patch = compileCommand(doc, { type: 'node.delete', ids: ['n1'] });
     expect(patch.groups).toEqual({});
   });
 });
@@ -878,5 +890,159 @@ describe('node.create — image src field (T-023)', () => {
     });
     const next = applyPatch(doc, patch);
     expect(next.nodes['img2']!.src).toBe('data:image/png;base64,AAAA');
+  });
+});
+
+describe('group.assign — create a group and frame the nodes (T-024, M7)', () => {
+  it('creates the group and sets groupId on every node in one patch', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'group.assign',
+      groupId: 'g1',
+      name: 'My frame',
+      ids: ['a', 'b'],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.groups['g1']).toEqual({ id: 'g1', name: 'My frame' });
+    expect(next.nodes['a']!.groupId).toBe('g1');
+    expect(next.nodes['b']!.groupId).toBe('g1');
+    expect(next.nodes['c']!.groupId).toBeUndefined();
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('do → undo restores the exact original document', () => {
+    const doc = docWith(node('a'), node('b'));
+    const patch = compileCommand(doc, {
+      type: 'group.assign',
+      groupId: 'g1',
+      name: 'g',
+      ids: ['a', 'b'],
+    });
+    const undone = applyPatch(applyPatch(doc, patch), invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('an empty id list compiles to an empty patch (no orphan groups)', () => {
+    const doc = docWith(node('a'));
+    const patch = compileCommand(doc, {
+      type: 'group.assign',
+      groupId: 'g1',
+      name: 'g',
+      ids: [],
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('unknown ids and duplicate group ids throw', () => {
+    const doc = docWith(node('a'));
+    doc.groups = { g1: { id: 'g1', name: 'x' } };
+    expect(() =>
+      compileCommand(doc, { type: 'group.assign', groupId: 'g1', name: 'y', ids: ['a'] }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, { type: 'group.assign', groupId: 'g2', name: 'y', ids: ['ghost'] }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, { type: 'group.assign', groupId: '', name: 'y', ids: ['a'] }),
+    ).toThrow(CommandError);
+  });
+
+  it('re-assigning a node from another group moves it', () => {
+    const doc = docWith(node('a'), node('b'));
+    doc.groups = { g1: { id: 'g1', name: 'one' } };
+    doc.nodes['a']!.groupId = 'g1';
+    const next = applyPatch(
+      doc,
+      compileCommand(doc, { type: 'group.assign', groupId: 'g2', name: 'two', ids: ['a'] }),
+    );
+    expect(next.nodes['a']!.groupId).toBe('g2');
+    expect(next.groups['g1']).toEqual({ id: 'g1', name: 'one' });
+    expect(validateDoc(next)).toEqual([]);
+  });
+});
+
+describe('group.unassign — remove memberships (T-024, M7)', () => {
+  function groupedDoc(): Doc {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    doc.groups = { g1: { id: 'g1', name: 'one' } };
+    doc.nodes['a']!.groupId = 'g1';
+    doc.nodes['b']!.groupId = 'g1';
+    return doc;
+  }
+
+  it('clears groupId on the listed nodes only', () => {
+    const doc = groupedDoc();
+    const next = applyPatch(
+      doc,
+      compileCommand(doc, { type: 'group.unassign', ids: ['a'] }),
+    );
+    expect(next.nodes['a']!.groupId).toBeUndefined();
+    expect(next.nodes['b']!.groupId).toBe('g1');
+    expect(next.groups['g1']).toBeDefined();
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('a group left empty is deleted in the same patch (one undo)', () => {
+    const doc = groupedDoc();
+    const patch = compileCommand(doc, {
+      type: 'group.unassign',
+      ids: ['a', 'b'],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.groups).toEqual({});
+    expect(next.nodes['a']!.groupId).toBeUndefined();
+    expect(next.nodes['b']!.groupId).toBeUndefined();
+    // One undo restores both memberships AND the group.
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('ungrouped ids are a no-op; unknown ids throw', () => {
+    const doc = groupedDoc();
+    expect(
+      isEmptyPatch(compileCommand(doc, { type: 'group.unassign', ids: ['c'] })),
+    ).toBe(true);
+    expect(() =>
+      compileCommand(doc, { type: 'group.unassign', ids: ['ghost'] }),
+    ).toThrow(CommandError);
+  });
+});
+
+describe('group frame geometry (T-024)', () => {
+  it('groupFrameRect wraps the members plus padding', () => {
+    const doc = docWith(
+      node('a', { x: 0, y: 0, w: 100, h: 50 }),
+      node('b', { x: 200, y: 300, w: 100, h: 50 }),
+    );
+    doc.groups = { g1: { id: 'g1', name: 'g' } };
+    doc.nodes['a']!.groupId = 'g1';
+    doc.nodes['b']!.groupId = 'g1';
+    const rect = groupFrameRect(doc, 'g1');
+    expect(rect).toEqual({
+      x: 0 - GROUP_FRAME_PADDING,
+      y: 0 - GROUP_FRAME_PADDING,
+      w: 300 + GROUP_FRAME_PADDING * 2,
+      h: 350 + GROUP_FRAME_PADDING * 2,
+    });
+    expect(groupFrameRect(doc, 'nope')).toBeNull();
+  });
+
+  it('groupMembersOf lists the members in order; [] when ungrouped', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    doc.groups = { g1: { id: 'g1', name: 'g' } };
+    doc.nodes['b']!.groupId = 'g1';
+    doc.nodes['c']!.groupId = 'g1';
+    expect(groupMembersOf(doc, 'b')).toEqual(['b', 'c']);
+    expect(groupMembersOf(doc, 'a')).toEqual([]);
+  });
+
+  it('groupFrameAt finds the frame containing a point', () => {
+    const doc = docWith(node('a', { x: 0, y: 0, w: 100, h: 50 }));
+    doc.groups = { g1: { id: 'g1', name: 'g' } };
+    doc.nodes['a']!.groupId = 'g1';
+    // Inside the padding ring around the node: (−8, −8).
+    expect(groupFrameAt(doc, { x: -8, y: -8 })).toBe('g1');
+    // Far outside.
+    expect(groupFrameAt(doc, { x: 500, y: 500 })).toBeNull();
   });
 });
