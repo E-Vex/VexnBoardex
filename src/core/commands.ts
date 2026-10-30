@@ -10,6 +10,7 @@ import type { Command, NodeContentPatch } from './types';
 import type { Doc } from './types';
 import type { Patch } from './types';
 import type { Anchor, Edge, Id, Node } from './types';
+import { deepEqual } from './deepEqual';
 
 /** Thrown when a command cannot be compiled (PLAN D-22). */
 export class CommandError extends Error {
@@ -262,11 +263,13 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
       ...(patch.color !== undefined ? { color: patch.color } : {}),
       ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
     };
-    // Skip nodes the patch does not actually change (deep-equal content).
+    // Skip nodes the patch does not actually change. `tags` is compared by
+    // content (deep-equal), not by reference: a caller-supplied array with
+    // the same tags is a no-op (D-22) and must not create a history entry.
     if (
       after.text === before.text &&
       after.color === before.color &&
-      after.tags === before.tags
+      deepEqual(after.tags, before.tags)
     ) {
       continue;
     }
@@ -564,9 +567,11 @@ function compileDuplicate(
       },
     };
     // Insert new nodes in order right after the original (preserving relative order).
+    // `indexOf` is recomputed on the mutated array, so it already accounts for
+    // the copies inserted so far — insert at `indexOf(original) + 1`, nothing more.
     const insertIndex = newOrder.indexOf(oldId);
     if (insertIndex >= 0) {
-      newOrder.splice(insertIndex + 1 + i, 0, newId!);
+      newOrder.splice(insertIndex + 1, 0, newId!);
     } else {
       newOrder.push(newId!);
     }
@@ -668,6 +673,13 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
       }
       break;
     }
+  }
+
+  // A command that does not change the order is a no-op: it compiles to an
+  // empty patch (D-22), so the store neither bumps the revision nor pushes
+  // a history entry whose undo would change nothing.
+  if (deepEqual(newOrder, doc.order)) {
+    return emptyPatch();
   }
 
   return {

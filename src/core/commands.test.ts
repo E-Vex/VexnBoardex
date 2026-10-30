@@ -730,6 +730,32 @@ describe('node.update — content patch (T-019, M7)', () => {
     expect(isEmptyPatch(patch)).toBe(true);
   });
 
+  it('a tags array with equal content but a different reference is a no-op (D-22)', () => {
+    // The caller supplies a fresh array (e.g. a deserialized patch or a UI
+    // rebuild). Content-equal tags must compile to an empty patch — a
+    // reference-equality check would create a phantom undo step that undoes
+    // nothing (D-22: a no-op command compiles to an empty patch).
+    const doc = docWith(node('a', { tags: ['x', 'y'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { tags: ['x', 'y'] },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('a tags array with different content is a change', () => {
+    const doc = docWith(node('a', { tags: ['x'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { tags: ['x', 'y'] },
+    });
+    expect(isEmptyPatch(patch)).toBe(false);
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a']!.tags).toEqual(['x', 'y']);
+  });
+
   it('empty ids compile to an empty patch', () => {
     const doc = docWith(node('a'));
     const patch = compileCommand(doc, {
@@ -890,6 +916,149 @@ describe('node.create — image src field (T-023)', () => {
     });
     const next = applyPatch(doc, patch);
     expect(next.nodes['img2']!.src).toBe('data:image/png;base64,AAAA');
+  });
+});
+
+describe('node.duplicate — z-order of the copies', () => {
+  it('each copy is inserted directly after its original (bottom → top)', () => {
+    // order: a, b, c (c on top). Duplicating a and b must give
+    // a, a2, b, b2, c — every copy right after its original, relative
+    // order of the copies preserved, nothing jumping above c.
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['a', 'b'],
+      newIds: ['a2', 'b2'],
+      newEdgeIds: [],
+    });
+    expect(patch.order).toEqual({
+      before: ['a', 'b', 'c'],
+      after: ['a', 'a2', 'b', 'b2', 'c'],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b', 'b2', 'c']);
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('works when the selection order is the reverse of the z-order', () => {
+    // Picking b first, then a: each copy still lands right after its
+    // original → a, a2, b, b2, c.
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['b', 'a'],
+      newIds: ['b2', 'a2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b', 'b2', 'c']);
+  });
+
+  it('a single copy is inserted directly after its original', () => {
+    const doc = docWith(node('a'), node('b'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['a'],
+      newIds: ['a2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b']);
+  });
+});
+
+describe('node.zOrder — z-order commands', () => {
+  it('front moves the selection to the top, preserving relative order', () => {
+    const doc = docWith(node('a'), node('b'), node('c'), node('d'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['b', 'a'],
+      mode: 'front',
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['c', 'd', 'b', 'a']);
+  });
+
+  it('back moves the selection to the bottom, preserving relative order', () => {
+    const doc = docWith(node('a'), node('b'), node('c'), node('d'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['d', 'c'],
+      mode: 'back',
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['d', 'c', 'a', 'b']);
+  });
+
+  it('front when already at the front is a no-op → empty patch (D-22)', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['b', 'c'],
+      mode: 'front',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('back when already at the back is a no-op → empty patch (D-22)', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['a', 'b'],
+      mode: 'back',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('forward at the very top is a no-op → empty patch (D-22)', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['c'],
+      mode: 'forward',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('backward at the very bottom is a no-op → empty patch (D-22)', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['a'],
+      mode: 'backward',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('a real reorder is not a no-op and undoes cleanly', () => {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: ['a'],
+      mode: 'front',
+    });
+    expect(isEmptyPatch(patch)).toBe(false);
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['b', 'c', 'a']);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('unknown ids throw CommandError', () => {
+    const doc = docWith(node('a'));
+    expect(() =>
+      compileCommand(doc, { type: 'node.zOrder', ids: ['ghost'], mode: 'front' }),
+    ).toThrow(CommandError);
+  });
+
+  it('empty ids compile to an empty patch', () => {
+    const doc = docWith(node('a'));
+    const patch = compileCommand(doc, {
+      type: 'node.zOrder',
+      ids: [],
+      mode: 'front',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
   });
 });
 
