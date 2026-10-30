@@ -564,9 +564,11 @@ function compileDuplicate(
       },
     };
     // Insert new nodes in order right after the original (preserving relative order).
+    // `indexOf` is recomputed on the mutated array, so it already accounts for
+    // the copies inserted so far — insert at `indexOf(original) + 1`, nothing more.
     const insertIndex = newOrder.indexOf(oldId);
     if (insertIndex >= 0) {
-      newOrder.splice(insertIndex + 1 + i, 0, newId!);
+      newOrder.splice(insertIndex + 1, 0, newId!);
     } else {
       newOrder.push(newId!);
     }

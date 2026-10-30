@@ -893,6 +893,54 @@ describe('node.create — image src field (T-023)', () => {
   });
 });
 
+describe('node.duplicate — z-order of the copies', () => {
+  it('each copy is inserted directly after its original (bottom → top)', () => {
+    // order: a, b, c (c on top). Duplicating a and b must give
+    // a, a2, b, b2, c — every copy right after its original, relative
+    // order of the copies preserved, nothing jumping above c.
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['a', 'b'],
+      newIds: ['a2', 'b2'],
+      newEdgeIds: [],
+    });
+    expect(patch.order).toEqual({
+      before: ['a', 'b', 'c'],
+      after: ['a', 'a2', 'b', 'b2', 'c'],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b', 'b2', 'c']);
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('works when the selection order is the reverse of the z-order', () => {
+    // Picking b first, then a: each copy still lands right after its
+    // original → a, a2, b, b2, c.
+    const doc = docWith(node('a'), node('b'), node('c'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['b', 'a'],
+      newIds: ['b2', 'a2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b', 'b2', 'c']);
+  });
+
+  it('a single copy is inserted directly after its original', () => {
+    const doc = docWith(node('a'), node('b'));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['a'],
+      newIds: ['a2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.order).toEqual(['a', 'a2', 'b']);
+  });
+});
+
 describe('group.assign — create a group and frame the nodes (T-024, M7)', () => {
   it('creates the group and sets groupId on every node in one patch', () => {
     const doc = docWith(node('a'), node('b'), node('c'));
