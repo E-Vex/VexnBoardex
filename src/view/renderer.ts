@@ -547,10 +547,42 @@ export function renderBoard(
     ctx.stroke();
   }
 
-  // 3b. Edges — between the grid and the nodes (T-010). Drawn in world
+  // 3a. Group frames (T-024) — translucent labeled rects around each
+  // group's members, beneath the edges and nodes (PLAN T-024: "frames
+  // render beneath edges"). Own save/transform: never nested inside
+  // another world transform (a nested transform would apply the camera
+  // twice).
+  const m = cameraToMatrix(camera);
+  ctx.save();
+  ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
+  for (const [groupId, group] of Object.entries(doc.groups)) {
+    const rect = groupFrameRect(doc, groupId);
+    if (rect === null) continue;
+    // A very subtle amber wash + a thin amber border, in world units (the
+    // frame belongs to the content; it zooms with it).
+    ctx.beginPath();
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
+    ctx.fillStyle = 'rgba(245, 166, 35, 0.05)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(245, 166, 35, 0.55)';
+    ctx.setLineDash([8, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // The group's name, just above the frame's top-left corner.
+    if (FONT_SIZE * m.scale >= MIN_TEXT_SIZE) {
+      ctx.font = `600 14px ${FONT_STACK}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = 'rgba(245, 166, 35, 0.9)';
+      ctx.fillText(group.name, rect.x + 4, rect.y - 4);
+    }
+  }
+  ctx.restore();
+
+  // 3b. Edges — between the grid/frames and the nodes (T-010). Drawn in world
   // coordinates through the camera transform, beneath all nodes (D-21).
   // Culling: skip edges whose both endpoints are outside the visible rect.
-  const m = cameraToMatrix(camera);
   const dragPreview = ui.drag
     ? { ids: new Set(ui.drag.ids), dx: ui.drag.dx, dy: ui.drag.dy }
     : null;
@@ -597,37 +629,6 @@ export function renderBoard(
       }
     }
     drawEdge(ctx, edge, doc, m.scale, dragPreview);
-  }
-  ctx.restore();
-
-  // 3b-1. Group frames (T-024) — translucent labeled rects around each
-  // group's members, beneath the edges and nodes. Own save/transform: never
-  // nested inside another world transform (a nested transform would apply
-  // the camera twice).
-  ctx.save();
-  ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
-  for (const [groupId, group] of Object.entries(doc.groups)) {
-    const rect = groupFrameRect(doc, groupId);
-    if (rect === null) continue;
-    // A very subtle amber wash + a thin amber border, in world units (the
-    // frame belongs to the content; it zooms with it).
-    ctx.beginPath();
-    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
-    ctx.fillStyle = 'rgba(245, 166, 35, 0.05)';
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(245, 166, 35, 0.55)';
-    ctx.setLineDash([8, 6]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // The group's name, just above the frame's top-left corner.
-    if (FONT_SIZE * m.scale >= MIN_TEXT_SIZE) {
-      ctx.font = `600 14px ${FONT_STACK}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = 'rgba(245, 166, 35, 0.9)';
-      ctx.fillText(group.name, rect.x + 4, rect.y - 4);
-    }
   }
   ctx.restore();
 

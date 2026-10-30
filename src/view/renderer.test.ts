@@ -717,3 +717,79 @@ describe('renderBoard — edge rendering (T-010)', () => {
     expect(countCalls(ctx, 'stroke')).toBeGreaterThanOrEqual(1); // origin
   });
 });
+
+describe('renderBoard — group frames (T-024)', () => {
+  const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+
+  /** A doc whose two nodes are grouped (g1) and connected by an edge. */
+  function docWithFrameAndEdge(): Doc {
+    const a = makeNode('a', { x: -300, y: -160, w: 200, h: 120 });
+    const b = makeNode('b', { x: 300, y: -160, w: 200, h: 120 });
+    const doc = docOf(a, b);
+    doc.nodes['a']!.groupId = 'g1';
+    doc.nodes['b']!.groupId = 'g1';
+    doc.groups['g1'] = { id: 'g1', name: 'frame' };
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+    };
+    return doc;
+  }
+
+  it('frames render beneath edges and nodes (grid → frames → edges → nodes)', () => {
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithFrameAndEdge(), {
+      selection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+    });
+
+    // The frame path is a roundRect (arcTo), the edge is a line (lineTo) and
+    // the node bodies are roundRects too. PLAN T-024: frames render beneath
+    // edges — so the FIRST arcTo (the frame) must come before the edge line,
+    // and at least one arcTo (a node body) after it.
+    const firstArcToIdx = firstIndex(ctx, 'arcTo');
+    // The edge is the only lineTo to (300, -100): the origin marker draws in
+    // screen space around the viewport centre, and the arrowhead lineTo calls
+    // land at x ≈ 291. With a at (-300, -160, 200×120) and b at (300, -160),
+    // the auto-anchored edge runs from a's right side (-100, -100) to b's
+    // left side (300, -100).
+    const edgeLineIdx = ctx.calls.findIndex(
+      (c) =>
+        c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === -100,
+    );
+    expect(firstArcToIdx).toBeGreaterThanOrEqual(0);
+    expect(edgeLineIdx).toBeGreaterThanOrEqual(0);
+    expect(firstArcToIdx).toBeLessThan(edgeLineIdx);
+
+    // Nodes still paint above the edge.
+    const nodeArcAfterEdge = ctx.calls.findIndex(
+      (c, i) => c.name === 'arcTo' && i > edgeLineIdx,
+    );
+    expect(nodeArcAfterEdge).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a node without a group draws no frame path', () => {
+    const a = makeNode('a', { x: -300, y: -160, w: 200, h: 120 });
+    const b = makeNode('b', { x: 300, y: -160, w: 200, h: 120 });
+    const doc = docOf(a, b);
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, {
+      selection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+    });
+
+    // Only the two node bodies use arcTo: 4 arcTo per roundRect × 2 nodes.
+    expect(countCalls(ctx, 'arcTo')).toBe(8);
+  });
+});
