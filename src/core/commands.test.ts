@@ -730,6 +730,32 @@ describe('node.update — content patch (T-019, M7)', () => {
     expect(isEmptyPatch(patch)).toBe(true);
   });
 
+  it('a tags array with equal content but a different reference is a no-op (D-22)', () => {
+    // The caller supplies a fresh array (e.g. a deserialized patch or a UI
+    // rebuild). Content-equal tags must compile to an empty patch — a
+    // reference-equality check would create a phantom undo step that undoes
+    // nothing (D-22: a no-op command compiles to an empty patch).
+    const doc = docWith(node('a', { tags: ['x', 'y'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { tags: ['x', 'y'] },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('a tags array with different content is a change', () => {
+    const doc = docWith(node('a', { tags: ['x'] }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { tags: ['x', 'y'] },
+    });
+    expect(isEmptyPatch(patch)).toBe(false);
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a']!.tags).toEqual(['x', 'y']);
+  });
+
   it('empty ids compile to an empty patch', () => {
     const doc = docWith(node('a'));
     const patch = compileCommand(doc, {

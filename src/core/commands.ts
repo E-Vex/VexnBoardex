@@ -10,6 +10,7 @@ import type { Command, NodeContentPatch } from './types';
 import type { Doc } from './types';
 import type { Patch } from './types';
 import type { Anchor, Edge, Id, Node } from './types';
+import { deepEqual } from './deepEqual';
 
 /** Thrown when a command cannot be compiled (PLAN D-22). */
 export class CommandError extends Error {
@@ -262,11 +263,13 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
       ...(patch.color !== undefined ? { color: patch.color } : {}),
       ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
     };
-    // Skip nodes the patch does not actually change (deep-equal content).
+    // Skip nodes the patch does not actually change. `tags` is compared by
+    // content (deep-equal), not by reference: a caller-supplied array with
+    // the same tags is a no-op (D-22) and must not create a history entry.
     if (
       after.text === before.text &&
       after.color === before.color &&
-      after.tags === before.tags
+      deepEqual(after.tags, before.tags)
     ) {
       continue;
     }
