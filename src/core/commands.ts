@@ -675,6 +675,13 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
     }
   }
 
+  // A command that does not change the order is a no-op: it compiles to an
+  // empty patch (D-22), so the store neither bumps the revision nor pushes
+  // a history entry whose undo would change nothing.
+  if (deepEqual(newOrder, doc.order)) {
+    return emptyPatch();
+  }
+
   return {
     nodes: {},
     edges: {},
