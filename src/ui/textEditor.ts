@@ -25,7 +25,9 @@ import { worldToScreen } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
 import {
+  FONT_SIZE,
   FONT_STACK,
+  LINE_HEIGHT,
   NODE_PADDING,
   NODE_TEXT_COLOR,
   TEXT_NODE_COLOR,
@@ -101,12 +103,16 @@ export function createTextEditor(
     host.style.transform = `scale(${cam.zoom})`;
     host.style.left = `${topLeft.x}px`;
     host.style.top = `${topLeft.y}px`;
-    // Layout at zoom-1 metrics; the transform scales it on screen.
+    // Layout at zoom-1 metrics; the transform scales it on screen. The font
+    // metrics come from the same theme constants the canvas renderer uses
+    // (T-020: the overlay's text must match the rendered text exactly at any
+    // zoom — hardcoding the numbers here would silently drift when the
+    // theme changes).
     area.style.width = `${node.w}px`;
     area.style.height = `${node.h}px`;
     area.style.padding = `${NODE_PADDING}px`;
-    area.style.fontSize = '16px';
-    area.style.lineHeight = '1.3';
+    area.style.fontSize = `${FONT_SIZE}px`;
+    area.style.lineHeight = String(LINE_HEIGHT);
     area.style.color =
       node.kind === 'text' ? TEXT_NODE_COLOR : NODE_TEXT_COLOR;
     // Cards and stickies show their own fill behind the text; text nodes
