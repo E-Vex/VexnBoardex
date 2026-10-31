@@ -27,18 +27,23 @@ export interface ImportResult {
   warnings: string[];
 }
 
-/** Export the current document as a .vexboard JSON file (download). */
-export function exportFile(doc: Doc, view?: { x: number; y: number; zoom: number }, filename?: string): void {
-  const json = serializeDoc(doc, view);
-  const blob = new Blob([json], { type: 'application/json' });
+/** Download `blob` as a file named `filename` (the a[download] dance). */
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename || `vexboard-${Date.now()}.vexboard`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/** Export the current document as a .vexboard JSON file (download). */
+export function exportFile(doc: Doc, view?: { x: number; y: number; zoom: number }, filename?: string): void {
+  const json = serializeDoc(doc, view);
+  const blob = new Blob([json], { type: 'application/json' });
+  downloadBlob(blob, filename || `vexboard-${Date.now()}.vexboard`);
 }
 
 /** Import a .vexboard JSON file (returns a promise that resolves on file load). */

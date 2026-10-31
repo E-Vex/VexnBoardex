@@ -26,7 +26,8 @@ import { renderBoard } from './view/renderer';
 import { setImageLoadedCallback } from './view/imageCache';
 import { createUiStore, pruneSelection } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
-import { exportFile, importFile, pickFile } from './io/file';
+import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
+import { renderDocToPng } from './view/pngExport';
 import { createNodeAt } from './input/cardCommand';
 import { screenToWorld } from './view/camera';
 import type { NodeKind } from './core/types';
@@ -505,6 +506,19 @@ function createToolbar(): void {
   makeBtn({ text: 'Front', onClick: bringToFront, isDisabled: () => uiStore.get().selection.length === 0 });
   makeBtn({ text: 'Back', onClick: sendToBack, isDisabled: () => uiStore.get().selection.length === 0 });
   makeBtn({ text: 'Export', onClick: () => exportFile(docStore.get(), store.get()) });
+  makeBtn({
+    // M8 (T-027): render the content bounds to an offscreen canvas at 2×
+    // with padding and download it as a PNG. The render lives in the view
+    // layer (it reuses the pure renderer); io only downloads the blob.
+    text: 'PNG',
+    onClick: async () => {
+      const blob = await renderDocToPng(docStore.get());
+      if (blob !== null) {
+        downloadBlob(blob, `vexboard-${Date.now()}.png`);
+      }
+    },
+    isDisabled: () => docStore.get().order.length === 0,
+  });
   makeBtn({
     text: 'Import',
     onClick: async () => {
