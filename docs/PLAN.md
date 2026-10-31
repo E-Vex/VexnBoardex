@@ -1,6 +1,6 @@
 # VexBoard — Project Plan
 
-> Status: v1.3 · Updated 2026-10-26 (M7 closed) · Owner of this file: **Planner**
+> Status: v1.4 · Updated 2026-10-31 (M8 closed) · Owner of this file: **Planner**
 > This file is the single source of truth for architecture, decisions and workflow.
 > The implementer does not edit it. Changes come from the Planner only.
 
@@ -343,6 +343,13 @@ Resize handles, in-place text editing (DOM overlay), sticky notes and cards, col
 
 ### M8 — Export
 PNG (offscreen render of content bounds at 2×, with padding), JSON; SVG optional.
+*Done when:* a PNG of the content bounds downloads and decodes with the right size and pixels, regardless of the current camera.
+
+**Status: closed.**
+- **T-013** JSON export/import (`.vexboard`) — landed with M4
+- **T-027** PNG export: pure `contentBounds` (nodes + group frames) in core; offscreen render of the content bounds at 2× with 32 units of padding via the unchanged pure renderer (`view/pngExport.ts` — io only downloads the blob, keeping the §4 layer rule); toolbar PNG button; black-box e2e (download, signature, IHDR dimensions, pixel probes, camera-independence)
+
+SVG export (optional) is not done — deferred until the Owner asks for it.
 
 ### M9 — Modes and templates
 Mind Map (tree auto-layout; Tab = child, Enter = sibling), Flowchart (shapes, orthogonal routing), Kanban (columns, snapping cards), Templates (saved documents).
@@ -417,11 +424,14 @@ Maintained by the Planner.
 | T-023 | M7: images | Done (PR #25) |
 | T-024 | M7: groups/frames | Done (PR #26) |
 | T-025 | Plan update: record M7 closure | Done |
+| T-027 | M8: PNG export | Done (PR #29) |
+| T-028 | Plan update: record M8 closure | Done |
 
 ---
 
 ## 10. Changelog
 
+- **v1.4** (2026-10-31, M8 closed): PNG export — pure `contentBounds` over nodes and group frames (T-027); an offscreen render of the content bounds at 2× with padding through the untouched renderer, with the download in io and a toolbar button; black-box e2e proving signature, IHDR size and pixels. JSON export had landed with M4 (T-013). SVG remains optional and undone.
 - **v1.3** (2026-10-26, M7 closed): rich content — `node.update`/`node.resize` commands and kind-specific rendering (T-019); in-place text editing via a camera-derived textarea overlay (T-020); corner resize handles with preview-only gestures (T-021); colors, tags and tag filtering through the inspector and filter bar (T-022); image nodes with data-URL src (T-023); groups/frames with same-patch membership and empty-group cascades (T-024). Repair release alongside: box-select machine un-stuck, working marquees, multi-selection group move (T-017); connect-preview separation, DPR-safe handles, import-apply and autosave-restore (T-018).
 - **v1.2** (2026-10-10, M1 closed): input conventions, camera startup and store (D-19, D-20); document-model decisions (D-21 to D-24) and the Core API (section 4); workflow rules 12–13 (head SHA in reports, no silent force-push, quota discipline); property tests, layer matrix test and black-box e2e in the testing strategy; M1 closed; M2 sliced; task board updated.
 - **v1.1** (2026-10-09, M0 closed): Node 24 pinned (D-03); Playwright black-box rule (D-04); tooling versions, CI and camera purity decisions (D-16 to D-18); camera API (section 4); new workflow rules 7–11 (evidence format, branches and merging, verification experiments, secrets, `AGENTS.md` cap); CI added to testing strategy and risks; M0 closed; task board updated.
