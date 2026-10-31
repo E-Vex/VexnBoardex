@@ -4,6 +4,7 @@ export * from './edgeGeometry';
 export * from './types';
 export { emptyDoc, validateDoc } from './doc';
 export { deepEqual } from './deepEqual';
+export { contentBounds } from './contentBounds';
 export {
   applyPatch,
   invertPatch,
