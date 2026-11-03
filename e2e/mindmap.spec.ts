@@ -258,4 +258,123 @@ test.describe('mind-map mode @ 1280×720', () => {
     await page.keyboard.press('Shift+Tab');
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
   });
+
+  test('7. Enter while typing commits the text and grows a sibling (T-030)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await enterMindMapMode(page);
+    await plantRoot(page); // rev 1, root selected, editor closed
+
+    // F2 reopens the editor on the root; typing replaces the selected text.
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await page.keyboard.type('Topic');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Topic');
+
+    // Plain Enter is claimed by the cadence: text commit (rev 2) + sibling
+    // root below (rev 3) — and the editor REOPENS on the new sibling.
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Idea');
+    await expect(page.locator('#vex-text-editor')).toBeFocused();
+    await page.keyboard.press('Escape');
+
+    // The typed text really is in the document: reopen the editor on the
+    // root (still centred at (640, 360)) and read it back.
+    await page.mouse.click(640, 360);
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Topic');
+    await page.keyboard.press('Escape');
+  });
+
+  test('8. Tab while typing commits and grows a child; undo un-grows before un-typing (T-030)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await enterMindMapMode(page);
+    const bg = await dominantColor(page);
+    await plantRoot(page); // rev 1
+
+    await page.keyboard.press('F2');
+    await page.keyboard.type('Parent');
+    // Plain Tab is claimed too: text commit (rev 2) + child + edge (rev 3).
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 2');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Idea');
+    await page.keyboard.press('Escape');
+
+    // The child grew to the right of the root, connected (T-029 geometry):
+    // its card fill appears centred at world (280, 0) → screen (920, 360).
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 920, 360), bg))
+      .toBe(false);
+
+    // First undo removes the child AND its edge — but NOT the typed text.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await page.mouse.click(640, 360); // reselect the root (selection pruned)
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Parent');
+    await page.keyboard.press('Escape');
+
+    // Second undo reverts the text itself: back to the default. (Undo and
+    // redo bump the revision too (D-29), so rev only ever counts up: 5 here.)
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 5');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Idea');
+    await page.keyboard.press('Escape');
+  });
+
+  test('9. Shift+Enter is still a soft newline; Escape still cancels (T-030)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await enterMindMapMode(page);
+    await plantRoot(page);
+
+    await page.keyboard.press('F2');
+    await page.keyboard.type('one');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('two');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('one\ntwo');
+
+    // Escape cancels the whole edit: no command, default text intact.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Idea');
+    await page.keyboard.press('Escape');
+  });
+
+  test('10. outside mind-map mode, plain Enter in the editor is still a newline (T-030)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await enterMindMapMode(page);
+    await plantRoot(page);
+
+    // Back to select mode and edit the root with the keyboard.
+    await page.getByRole('button', { name: 'Mode: Mind Map' }).click();
+    await expect(page.getByTestId('hud-mode')).toHaveText('mode select');
+    await page.mouse.click(400, 600); // focus back on the board
+    await page.mouse.click(640, 360); // select the root
+    await page.keyboard.press('Enter'); // select mode: Enter opens the editor
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await page.keyboard.type('a');
+    await page.keyboard.press('Enter'); // NOT claimed outside mind-map mode
+    await expect(page.locator('#vex-text-editor')).toHaveValue('a\n');
+    // Nothing was grown and nothing was committed yet.
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+    await page.keyboard.press('Escape');
+  });
 });
