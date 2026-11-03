@@ -228,6 +228,34 @@ describe('validateDoc — bad-number', () => {
   });
 });
 
+describe('validateDoc — bad-shape (T-032)', () => {
+  it('accepts each of the four shapes', () => {
+    for (const shape of ['rect', 'rounded', 'diamond', 'stadium'] as const) {
+      const doc = validDoc();
+      doc.nodes.n1!.shape = shape;
+      expect(validateDoc(doc)).toEqual([]);
+    }
+  });
+
+  it('accepts an absent shape (pre-shape files stay valid)', () => {
+    expect(validateDoc(validDoc())).toEqual([]);
+  });
+
+  it('flags an unknown shape', () => {
+    const doc = validDoc();
+    doc.nodes.n1!.shape = 'hexagon' as Node['shape'];
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-shape:'))).toBe(true);
+  });
+
+  it('flags a non-string shape', () => {
+    const doc = validDoc();
+    doc.nodes.n1!.shape = 7 as unknown as Node['shape'];
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-shape:'))).toBe(true);
+  });
+});
+
 describe('validateDoc — multiple violations', () => {
   it('reports all violations found', () => {
     const doc = validDoc();
