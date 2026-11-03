@@ -1,6 +1,6 @@
 # VexBoard — Project Plan
 
-> Status: v1.4 · Updated 2026-10-31 (M8 closed) · Owner of this file: **Planner**
+> Status: v1.5 · Updated 2026-11-04 (M9 opened: first slices landed) · Owner of this file: **Planner**
 > This file is the single source of truth for architecture, decisions and workflow.
 > The implementer does not edit it. Changes come from the Planner only.
 
@@ -120,6 +120,13 @@ Milestone / Depends on
 | D-22 | **Commands are plain, serializable data.** `compileCommand(doc, command) → Patch` is pure and strict: an invalid command (unknown id, duplicate id, non-finite number, dangling reference) throws `CommandError`. A no-op command compiles to an empty patch. `applyPatch` is strict too: it throws `PatchConflictError` if a patch's `before` does not match the document. IDs come from the caller (D-11). | Desync bugs fail loudly in tests instead of silently corrupting a document. |
 | D-23 | **Determinism is enforced by lint in `core/`:** no `Date` and no `Math.random` in non-test core files. | D-06 enforced by tooling. |
 | D-24 | **Document validity** is defined by `validateDoc` (pure): `order` is exactly a permutation of the node ids; every map key equals its entity's id; every edge references two existing, distinct nodes; every `groupId` references an existing group; all numbers are finite, with `w > 0` and `h > 0`. Property tests run it after every command. | One definition of "valid", reused by the loader in M4. |
+| D-25 | **The UI state layer is a pure `uiStore` living in `view/`** (not `ui/`): selection, drag / connect / resize previews, the node being edited, the tag filter, the box-select rect and the interaction mode. The renderer and the input layer read it; `ui/` writes it. Never saved, never in history (I-05). | The dependency rule (§4) forbids `view` and `input` from importing `ui/`; a store in `view/` is the one place all three layers can see without a cycle. (Landed with T-008; recorded here late — T-031.) |
+| D-26 | **Gesture rules.** Only the primary button starts select / drag / connect gestures; a drag starts only at/after a screen-pixel threshold; pointer-move updates the preview only (I-04); pointer-up commits exactly ONE command; cancel paths (Escape, blur, threshold not reached, panning taking over the pointer) dispatch nothing. | A move is one undo step, and a stray click never becomes a drag. (T-008, T-017; recorded late — T-031.) |
+| D-27 | **Never steal typing.** Every app-level key handler stands down when the event target is editable (input, textarea, contenteditable — or the open text overlay, which IS the editable target); Delete/Backspace with modifier keys held are ignored; document changes prune the selection but never the editor. | The board must never eat a keystroke meant for text. (T-008, T-020; recorded late — T-031.) |
+| D-28 | **Double-click creation is gated by `shouldCreateCardAt`** (pure): a double-click creates a node only on empty space; on an existing node it is reserved for text editing. The created node is selected. | One predicate decides create-vs-edit, testable without a browser. (T-007/T-008; recorded late — T-031.) |
+| D-29 | **The revision counter** starts at 0 and increments by 1 for every non-empty applied patch — dispatch, undo and redo alike; empty patches and failed dispatches leave it unchanged. | The HUD and autosave can observe "the document really changed" through one number. (T-008; recorded late — T-031.) |
+| D-30 | **Edges have exactly five anchors** — `auto \| top \| right \| bottom \| left` per endpoint — checked at runtime because commands are plain data (D-22); two edges may never share the same (from, to) pair (`validateDoc`, reverse direction allowed). | Serializable, validated endpoints keep edge data honest. (T-009; recorded late — T-031.) |
+| D-31 | **Edge geometry is pure and computed at render time** (`edgeGeometry`): `nodeRect`, `anchorPoint`, `edgeEndpoints` derive from the CURRENT node rectangles; an edge stores only node ids + anchors (+ optional label). Fixed anchors are side midpoints; `auto` is where the center-to-center ray leaves the rectangle. | Moving a node can never desync an arrow (I-01). (T-009; recorded late — T-031.) |
 
 ---
 
@@ -354,6 +361,16 @@ SVG export (optional) is not done — deferred until the Owner asks for it.
 ### M9 — Modes and templates
 Mind Map (tree auto-layout; Tab = child, Enter = sibling), Flowchart (shapes, orthogonal routing), Kanban (columns, snapping cards), Templates (saved documents).
 
+**Status: open.** First slices landed:
+- **T-029** Mind Map mode (PR #31): pure tree planning over the EXISTING edges (D-14 — no second data model); Tab grows a child, Enter a sibling; node + edge in one `batch` = one undo step; the mode lives in the UI store (D-25/I-05) with a HUD mode line and a toolbar toggle; deterministic, overlap-free placement (child to the right below existing children, sibling below the bottom-most child).
+- **T-030** Mind-map typing cadence (PR #32): a plain Enter/Tab pressed while typing commits the text first (one `node.update`), then grows a sibling (Enter) or a child (Tab), and the editor reopens on the new node — key → type → commit, no mouse trips. Modified keys and IME composition are never claimed (D-27). Undo un-grows before it un-types.
+
+Remaining (the Planner re-slices as we learn):
+- **T-032** Flowchart shapes: optional `node.shape` (`rect` default, `rounded`, `diamond`, `stadium`), kind-independent; renderer + inspector picker; old files stay valid (I-08).
+- **T-033** Orthogonal edge routing: per-edge `route: 'auto' | 'straight' | 'orthogonal'`; elbow route with anchor selection computed at render time (D-31).
+- **T-034** Templates: save the current document as a named template (IndexedDB, like autosave); "New from template" in the toolbar. Templates are saved documents (D-14).
+- **T-035** Kanban: columns as frames with a layout role, card snapping — likely re-sliced once T-032/T-033 teach us how modes and shapes interact.
+
 ### M10 — Desktop and performance
 Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; target: 5,000 nodes stay smooth.
 
@@ -383,7 +400,7 @@ Tauri wrapper, native open/save dialogs, viewport culling and a spatial index; t
 | Skipping the command layer in M2 and bolting undo on later | I-03 and D-09 are locked; T-006 builds `dispatch` before any node UI exists |
 | Coordinate bugs creeping in through ad-hoc math | I-02; one camera module; debug HUD from M1 |
 | Text editing complexity (IME, multiline, zoom alignment) | Isolated behind one overlay component (I-10) |
-| Edge routing for flowcharts | Straight and curved only until M9 |
+| Edge routing for flowcharts | Straight and curved only until T-033 (M9) |
 | Scope creep (modes, templates) | Nothing from M9 starts before M8 is solid |
 | Agent builds the wrong thing for several milestones | Requirements live here and in briefs, never only in chat; every report is checked against PLAN |
 | Secrets leaking into the repo | Rule 10; CI hygiene guard; GitHub push protection; fine-grained, repo-limited, expiring tokens |
@@ -423,14 +440,19 @@ Maintained by the Planner.
 | T-022 | M7: colors + tags with filtering | Done (PR #24) |
 | T-023 | M7: images | Done (PR #25) |
 | T-024 | M7: groups/frames | Done (PR #26) |
-| T-025 | Plan update: record M7 closure | Done |
+| T-025 | Plan update: record M7 closure | Done (PR #27) |
+| T-026 | Bug fixes: z-order no-ops, frame layering, no-op detection, duplicate z-order, editor font metrics | Done (PR #28) |
 | T-027 | M8: PNG export | Done (PR #29) |
-| T-028 | Plan update: record M8 closure | Done |
+| T-028 | Plan update: record M8 closure | Done (PR #30) |
+| T-029 | M9: Mind Map mode (tree planning, Tab/Enter, HUD mode line) | Done (PR #31) |
+| T-030 | M9: Mind Map typing cadence (Enter/Tab while typing commit + grow) | Done (PR #32) |
+| T-031 | Plan update: M9 slicing + backfill decisions D-25…D-31 | Done (PR #33) |
 
 ---
 
 ## 10. Changelog
 
+- **v1.5** (2026-11-04, M9 opened): Mind Map mode (T-029, PR #31) — the tree is the existing edges (D-14), grown by Tab/Enter as one batch = one undo step, with the mode in the UI store and a HUD mode line; the typing cadence (T-030, PR #32) — plain Enter/Tab while typing commit the text, grow a sibling/child and reopen the editor, with undo un-growing before un-typing. Housekeeping (T-031, PR #33): the decision table is backfilled with D-25…D-31 (decisions the code had already implemented and cited since M2/M3 but that were never written into this file); the task board gains the missing T-026/T-029/T-030 rows; M9 is sliced through T-035.
 - **v1.4** (2026-10-31, M8 closed): PNG export — pure `contentBounds` over nodes and group frames (T-027); an offscreen render of the content bounds at 2× with padding through the untouched renderer, with the download in io and a toolbar button; black-box e2e proving signature, IHDR size and pixels. JSON export had landed with M4 (T-013). SVG remains optional and undone.
 - **v1.3** (2026-10-26, M7 closed): rich content — `node.update`/`node.resize` commands and kind-specific rendering (T-019); in-place text editing via a camera-derived textarea overlay (T-020); corner resize handles with preview-only gestures (T-021); colors, tags and tag filtering through the inspector and filter bar (T-022); image nodes with data-URL src (T-023); groups/frames with same-patch membership and empty-group cascades (T-024). Repair release alongside: box-select machine un-stuck, working marquees, multi-selection group move (T-017); connect-preview separation, DPR-safe handles, import-apply and autosave-restore (T-018).
 - **v1.2** (2026-10-10, M1 closed): input conventions, camera startup and store (D-19, D-20); document-model decisions (D-21 to D-24) and the Core API (section 4); workflow rules 12–13 (head SHA in reports, no silent force-push, quota discipline); property tests, layer matrix test and black-box e2e in the testing strategy; M1 closed; M2 sliced; task board updated.

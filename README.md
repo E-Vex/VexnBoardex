@@ -3,6 +3,8 @@
 VexBoard is a visual drawing and planning tool: an infinite canvas for text, sticky notes, cards, images, arrows, groups and tags.
 It is a free-form board for thinking — idea → project → tasks → done — not a To-Do list.
 
+In **mind-map mode** the board grows a tree straight from the keyboard: `Tab` adds a child, `Enter` a sibling — and while typing, `Enter`/`Tab` commit the text and grow the next node, so a map builds itself without touching the mouse.
+
 ## Run it
 
 ```bash
