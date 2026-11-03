@@ -135,11 +135,14 @@ const nodeInput = attachNodeInput({
   editNode: (id) => textEditor.edit(id),
 });
 
-// In-place text editor overlay (T-020): one node.update command per commit.
+// In-place text editor overlay (T-020, T-030): one node.update command per
+// commit. Plain Enter/Tab while editing are offered to the mind-map input
+// first (the typing cadence); it claims them only in mind-map mode.
 const textEditor = createTextEditor({
   cameraStore: store,
   docStore,
   uiStore,
+  onNavKey: (key, id) => mindMapInput.claimEditorNavKey(key, id),
 });
 
 // Inspector (colors, tags) and the tag filter bar (T-022). Every change is
@@ -171,6 +174,9 @@ const connectInput = attachConnectInput({
 
 // Mind-map input (T-029, M9): Tab = child, Enter = sibling — active only in
 // `mindmap` mode, checked inside the handler (the mode is UI state, I-05).
+// The typing cadence (T-030) flows back through the editor's onNavKey hook
+// above: a plain Enter/Tab while typing commits the text, grows the tree and
+// reopens the editor on the new node.
 const mindMapInput = attachMindMapInput({
   docStore,
   uiStore,
@@ -181,6 +187,7 @@ const mindMapInput = attachMindMapInput({
   }),
   newId: () => crypto.randomUUID(),
   editNode: (id) => textEditor.edit(id),
+  commitEditor: () => textEditor.commit(),
 });
 
 // --- Autosave (T-013, T-018) ---
