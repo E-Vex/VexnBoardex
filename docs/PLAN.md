@@ -361,12 +361,12 @@ SVG export (optional) is not done — deferred until the Owner asks for it.
 ### M9 — Modes and templates
 Mind Map (tree auto-layout; Tab = child, Enter = sibling), Flowchart (shapes, orthogonal routing), Kanban (columns, snapping cards), Templates (saved documents).
 
-**Status: open.** First slices landed:
+**Status: open.** Landed so far:
 - **T-029** Mind Map mode (PR #31): pure tree planning over the EXISTING edges (D-14 — no second data model); Tab grows a child, Enter a sibling; node + edge in one `batch` = one undo step; the mode lives in the UI store (D-25/I-05) with a HUD mode line and a toolbar toggle; deterministic, overlap-free placement (child to the right below existing children, sibling below the bottom-most child).
 - **T-030** Mind-map typing cadence (PR #32): a plain Enter/Tab pressed while typing commits the text first (one `node.update`), then grows a sibling (Enter) or a child (Tab), and the editor reopens on the new node — key → type → commit, no mouse trips. Modified keys and IME composition are never claimed (D-27). Undo un-grows before it un-types.
+- **T-032** Flowchart shapes (PR #34): optional `node.shape` (`rect` sharp process box, `rounded`, `diamond`, `stadium`), kind-independent; absent = the kind's classic outline, so every pre-shape file renders pixel-identically (I-08, no version bump); strict command validation (D-22); diamond text stays inside the inscribed rectangle; inspector picker (one `node.update` per selection); the editor overlay mirrors the outline.
 
 Remaining (the Planner re-slices as we learn):
-- **T-032** Flowchart shapes: optional `node.shape` (`rect` default, `rounded`, `diamond`, `stadium`), kind-independent; renderer + inspector picker; old files stay valid (I-08).
 - **T-033** Orthogonal edge routing: per-edge `route: 'auto' | 'straight' | 'orthogonal'`; elbow route with anchor selection computed at render time (D-31).
 - **T-034** Templates: save the current document as a named template (IndexedDB, like autosave); "New from template" in the toolbar. Templates are saved documents (D-14).
 - **T-035** Kanban: columns as frames with a layout role, card snapping — likely re-sliced once T-032/T-033 teach us how modes and shapes interact.
@@ -447,12 +447,14 @@ Maintained by the Planner.
 | T-029 | M9: Mind Map mode (tree planning, Tab/Enter, HUD mode line) | Done (PR #31) |
 | T-030 | M9: Mind Map typing cadence (Enter/Tab while typing commit + grow) | Done (PR #32) |
 | T-031 | Plan update: M9 slicing + backfill decisions D-25…D-31 | Done (PR #33) |
+| T-032 | M9: flowchart shapes (node.shape, renderer, inspector picker) | Done (PR #34) |
+| T-036 | Plan update: record T-032, keep the M9 board current | Done (PR #35) |
 
 ---
 
 ## 10. Changelog
 
-- **v1.5** (2026-11-04, M9 opened): Mind Map mode (T-029, PR #31) — the tree is the existing edges (D-14), grown by Tab/Enter as one batch = one undo step, with the mode in the UI store and a HUD mode line; the typing cadence (T-030, PR #32) — plain Enter/Tab while typing commit the text, grow a sibling/child and reopen the editor, with undo un-growing before un-typing. Housekeeping (T-031, PR #33): the decision table is backfilled with D-25…D-31 (decisions the code had already implemented and cited since M2/M3 but that were never written into this file); the task board gains the missing T-026/T-029/T-030 rows; M9 is sliced through T-035.
+- **v1.5** (2026-11-04, M9 opened): Mind Map mode (T-029, PR #31) — the tree is the existing edges (D-14), grown by Tab/Enter as one batch = one undo step, with the mode in the UI store and a HUD mode line; the typing cadence (T-030, PR #32) — plain Enter/Tab while typing commit the text, grow a sibling/child and reopen the editor, with undo un-growing before un-typing; flowchart shapes (T-032, PR #34) — optional `node.shape` with strict validation, shape-aware rendering (diamond text inside the inscribed rectangle), an inspector picker and a shape-mirroring editor overlay, all backward compatible without a version bump. Housekeeping (T-031, PR #33; T-036, PR #35): the decision table is backfilled with D-25…D-31 (decisions the code had already implemented and cited since M2/M3 but that were never written into this file); the task board gains the missing T-026/T-029/T-030 rows; M9 is sliced through T-035.
 - **v1.4** (2026-10-31, M8 closed): PNG export — pure `contentBounds` over nodes and group frames (T-027); an offscreen render of the content bounds at 2× with padding through the untouched renderer, with the download in io and a toolbar button; black-box e2e proving signature, IHDR size and pixels. JSON export had landed with M4 (T-013). SVG remains optional and undone.
 - **v1.3** (2026-10-26, M7 closed): rich content — `node.update`/`node.resize` commands and kind-specific rendering (T-019); in-place text editing via a camera-derived textarea overlay (T-020); corner resize handles with preview-only gestures (T-021); colors, tags and tag filtering through the inspector and filter bar (T-022); image nodes with data-URL src (T-023); groups/frames with same-patch membership and empty-group cascades (T-024). Repair release alongside: box-select machine un-stuck, working marquees, multi-selection group move (T-017); connect-preview separation, DPR-safe handles, import-apply and autosave-restore (T-018).
 - **v1.2** (2026-10-10, M1 closed): input conventions, camera startup and store (D-19, D-20); document-model decisions (D-21 to D-24) and the Core API (section 4); workflow rules 12–13 (head SHA in reports, no silent force-push, quota discipline); property tests, layer matrix test and black-box e2e in the testing strategy; M1 closed; M2 sliced; task board updated.
