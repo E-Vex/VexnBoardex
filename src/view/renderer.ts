@@ -503,6 +503,7 @@ export function renderBoard(
     resize: null,
     tagFilter: [],
     boxSelect: null,
+    mode: 'select',
   },
 ): void {
   const { width, height } = viewport;

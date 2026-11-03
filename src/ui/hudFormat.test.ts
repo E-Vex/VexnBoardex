@@ -168,3 +168,22 @@ describe('formatHud — selected and rev counters (T-008 R9)', () => {
     expect(formatHud(cam, null, 0, 2.4, 3.6).rev).toBe('4');
   });
 });
+
+describe('formatHud — mode (T-029)', () => {
+  const cam: Camera = { x: -640, y: -360, zoom: 1 };
+
+  it('defaults to "select" when no mode is passed', () => {
+    expect(formatHud(cam, null, 0, 0, 0).mode).toBe('select');
+  });
+
+  it('renders the mode verbatim', () => {
+    expect(formatHud(cam, null, 0, 0, 0, 'select').mode).toBe('select');
+    expect(formatHud(cam, null, 0, 0, 0, 'mindmap').mode).toBe('mindmap');
+  });
+
+  it('works with a cursor too', () => {
+    const hud = formatHud(cam, { x: 10, y: 20 }, 1, 1, 2, 'mindmap');
+    expect(hud.mode).toBe('mindmap');
+    expect(hud.nodes).toBe('1');
+  });
+});

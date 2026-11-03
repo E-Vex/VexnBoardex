@@ -69,7 +69,7 @@ const host = createCanvasHost(({ ctx, width, height }) => {
 // (so the HUD world-coords stay in sync without a redraw).
 const hud = createHud();
 
-/** Refresh every HUD line from the three stores (T-008 R7). */
+/** Refresh every HUD line from the three stores (T-008 R7, T-029). */
 function refreshHud(): void {
   hud.update(
     store.get(),
@@ -77,6 +77,7 @@ function refreshHud(): void {
     docStore.get().order.length,
     uiStore.get().selection.length,
     docStore.getRevision(),
+    uiStore.get().mode,
   );
 }
 

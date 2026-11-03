@@ -328,6 +328,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Origin marker (1) + node border (1) + 4 connect handles (4) + outline
@@ -373,6 +374,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Origin marker + the node's own border stroke = 2 strokes.
@@ -396,6 +398,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // The outline path starts at (x - 3 + 11, y - 3) = (-92, -63)…
@@ -423,6 +426,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
         resize: null,
         tagFilter: [],
         boxSelect: null,
+        mode: 'select',
       });
 
       const lineWidths = ctx.calls
@@ -448,6 +452,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Only the visible node: 2 nodes' worth of paths would be 8 arcTo.
@@ -475,6 +480,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Node a is drawn at (-300+50, -100+25) = (-250, -75): its first arcTo
@@ -504,6 +510,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     const fillText = ctx.calls.find((c) => c.name === 'fillText')!;
@@ -524,6 +531,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // a is first in doc.order and is still drawn (and texted) first.
@@ -547,6 +555,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     expect(countCalls(ctx, 'arcTo')).toBe(0);
@@ -615,6 +624,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Grid rects (dots) happen first, then edge lineTo, then node arcTo.
@@ -641,6 +651,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // The edge's 'from' endpoint should be at a's dragged position.
@@ -663,6 +674,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Label should be drawn with fillText at the midpoint of the edge.
@@ -688,6 +700,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     const fillTextCalls = ctx.calls.filter((c) => c.name === 'fillText');
@@ -709,6 +722,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // No edge drawing calls (beyond origin/grid which don't use lineTo for edges)
@@ -747,6 +761,7 @@ describe('renderBoard — group frames (T-024)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // The frame path is a roundRect (arcTo), the edge is a line (lineTo) and
@@ -787,6 +802,7 @@ describe('renderBoard — group frames (T-024)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
 
     // Only the two node bodies use arcTo: 4 arcTo per roundRect × 2 nodes.
