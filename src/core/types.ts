@@ -12,6 +12,14 @@ export type Id = string;
 /** The visual kind of a node. */
 export type NodeKind = 'text' | 'sticky' | 'card' | 'image';
 
+/**
+ * The outline shape of a node (T-032, M9 — flowchart shapes). Optional:
+ * absent means `'rect'`, so every file written before shapes exists stays
+ * valid without a migration (I-08). Kind-independent — `text` nodes simply
+ * draw no outline, so a shape on them changes nothing visually.
+ */
+export type NodeShape = 'rect' | 'rounded' | 'diamond' | 'stadium';
+
 /** Edge anchor points on a node border (or 'auto' for automatic routing). */
 export type Anchor = 'auto' | 'top' | 'right' | 'bottom' | 'left';
 
@@ -30,6 +38,8 @@ export interface Node {
   /** For image nodes: the image source — a data URL (T-023). Optional so
    * older files (and non-image kinds) stay valid without it. */
   src?: string;
+  /** The outline shape (T-032). Optional — absent renders as `'rect'`. */
+  shape?: NodeShape;
 }
 
 /** One endpoint of an edge, referencing a node by id (I-01). */
@@ -113,9 +123,11 @@ export type Command =
 /**
  * The editable content fields of a node (T-019, M7): text, colour and tags.
  * Geometry is edited through `node.resize` / `node.move`, never here.
+ * `shape` joined in T-032 (M9) — an outline change is content, not geometry.
  */
 export interface NodeContentPatch {
   text?: string;
   color?: string;
   tags?: string[];
+  shape?: NodeShape;
 }

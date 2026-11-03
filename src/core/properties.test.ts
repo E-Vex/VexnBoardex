@@ -27,6 +27,15 @@ const RUNS = 200;
 
 const KINDS: Node['kind'][] = ['text', 'sticky', 'card', 'image'];
 const ANCHORS: Anchor[] = ['auto', 'top', 'right', 'bottom', 'left'];
+// T-032: nodes usually have no shape (the classic outline); sometimes one
+// of the four, so the property runs exercise shape validation too.
+const SHAPES: (Node['shape'] | undefined)[] = [
+  undefined,
+  'rect',
+  'rounded',
+  'diamond',
+  'stadium',
+];
 
 function makeNode(rng: () => number, id: string): Node {
   return {
@@ -39,6 +48,7 @@ function makeNode(rng: () => number, id: string): Node {
     text: '',
     color: '#fff',
     tags: [],
+    shape: SHAPES[Math.floor(rng() * SHAPES.length)]!,
   };
 }
 

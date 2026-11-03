@@ -1,6 +1,7 @@
 /**
  * Inspector panel (T-022, M7) — a DOM panel at the top right, shown while
- * nodes are selected: a colour swatch row and a tag editor.
+ * nodes are selected: a colour swatch row, a shape picker (T-032, M9) and
+ * a tag editor.
  *
  * Every change goes through ONE `node.update` command for the whole
  * selection (I-03): recolouring five nodes is one undo step; adding a tag
@@ -9,6 +10,7 @@
  */
 
 import type { DocStore } from '../core/store';
+import type { NodeShape } from '../core/types';
 import type { UiStore } from '../view/uiStore';
 
 /** The preset swatch colours (M7). */
@@ -21,6 +23,14 @@ export const SWATCH_COLORS: string[] = [
   '#fde2cf', // peach
   '#e8e8ee', // light gray
   '#ffffff', // white
+];
+
+/** The four flowchart shapes offered by the picker (T-032, M9). */
+const SHAPES: { value: NodeShape; label: string }[] = [
+  { value: 'rect', label: 'Rect' },
+  { value: 'rounded', label: 'Rounded' },
+  { value: 'diamond', label: 'Diamond' },
+  { value: 'stadium', label: 'Stadium' },
 ];
 
 const PANEL_STYLE = `
@@ -46,6 +56,16 @@ const SWATCH_STYLE = `
   border: 1px solid rgba(255, 255, 255, 0.4);
   cursor: pointer;
   padding: 0;
+`;
+
+const SHAPE_BUTTON_STYLE = `
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8e8ef;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
 `;
 
 export interface Inspector {
@@ -102,6 +122,40 @@ export function createInspector(
       swatchRow.appendChild(btn);
     }
     root.appendChild(swatchRow);
+
+    // ── Shape picker (T-032, M9) ────────────────────────────────────────
+    // One `node.update` for the whole selection — a shape change is content,
+    // so it is one undo step for any number of nodes (I-03). The active
+    // button is the shape EVERY selected node carries exactly (undefined —
+    // the kind's classic outline — leaves none active).
+    const shapeLabel = document.createElement('div');
+    shapeLabel.textContent = 'Shape';
+    shapeLabel.style.opacity = '0.7';
+    root.appendChild(shapeLabel);
+
+    const shapeRow = document.createElement('div');
+    shapeRow.style.cssText = 'display: flex; gap: 6px; flex-wrap: wrap;';
+    for (const { value, label } of SHAPES) {
+      const active = nodes.every((n) => n.shape === value);
+      const btn = document.createElement('button');
+      btn.dataset.testid = `shape-${value}`;
+      btn.textContent = label;
+      btn.title = value;
+      btn.style.cssText =
+        SHAPE_BUTTON_STYLE +
+        (active
+          ? '; border-color: #ffffff; background: rgba(255, 255, 255, 0.25);'
+          : '');
+      btn.onclick = () => {
+        docStore.dispatch({
+          type: 'node.update',
+          ids: [...uiStore.get().selection],
+          patch: { shape: value },
+        });
+      };
+      shapeRow.appendChild(btn);
+    }
+    root.appendChild(shapeRow);
 
     // ── Tags ─────────────────────────────────────────────────────────────
     const tagLabel = document.createElement('div');

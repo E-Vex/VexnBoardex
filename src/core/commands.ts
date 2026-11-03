@@ -23,6 +23,9 @@ export class CommandError extends Error {
 
 const VALID_KINDS = new Set(['text', 'sticky', 'card', 'image']);
 
+/** The four valid node shapes (T-032) — same set as `validateDoc`'s. */
+const VALID_SHAPES = new Set(['rect', 'rounded', 'diamond', 'stadium']);
+
 /** The five valid edge anchors (D-30). Checked at runtime — commands are data. */
 const VALID_ANCHORS = new Set<Anchor>([
   'auto',
@@ -92,6 +95,9 @@ function compileCreate(doc: Doc, node: Node): Patch {
   }
   if (node.src !== undefined && !isString(node.src)) {
     throw new CommandError('node.create: src is not a string');
+  }
+  if (node.shape !== undefined && !VALID_SHAPES.has(node.shape)) {
+    throw new CommandError(`node.create: invalid shape "${node.shape}"`);
   }
 
   return {
@@ -235,6 +241,9 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
   if (patch.tags !== undefined && !isStringArray(patch.tags)) {
     throw new CommandError('node.update: patch.tags is not an array of strings');
   }
+  if (patch.shape !== undefined && !VALID_SHAPES.has(patch.shape)) {
+    throw new CommandError(`node.update: invalid patch.shape "${patch.shape}"`);
+  }
 
   // De-duplicate ids (first occurrence wins).
   const seen = new Set<Id>();
@@ -263,6 +272,7 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
       ...(patch.text !== undefined ? { text: patch.text } : {}),
       ...(patch.color !== undefined ? { color: patch.color } : {}),
       ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+      ...(patch.shape !== undefined ? { shape: patch.shape } : {}),
     };
     // Skip nodes the patch does not actually change. `tags` is compared by
     // content (deep-equal), not by reference: a caller-supplied array with
@@ -270,7 +280,8 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
     if (
       after.text === before.text &&
       after.color === before.color &&
-      deepEqual(after.tags, before.tags)
+      deepEqual(after.tags, before.tags) &&
+      after.shape === before.shape
     ) {
       continue;
     }

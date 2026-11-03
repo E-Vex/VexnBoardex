@@ -5,7 +5,7 @@
  * without affecting other documents.
  */
 
-import type { Doc, Id } from './types';
+import type { Doc, Id, NodeShape } from './types';
 
 /** A fresh `{ nodes: {}, edges: {}, groups: {}, order: [] }` each call. */
 export function emptyDoc(): Doc {
@@ -16,6 +16,14 @@ export function emptyDoc(): Doc {
     order: [],
   };
 }
+
+/** The four valid node shapes (T-032, D-24-style central definition). */
+export const VALID_SHAPES: ReadonlySet<NodeShape> = new Set([
+  'rect',
+  'rounded',
+  'diamond',
+  'stadium',
+]);
 
 /**
  * `validateDoc` — returns a list of violation messages, empty when the
@@ -31,6 +39,8 @@ export function emptyDoc(): Doc {
  * - `group-dangling:` — a node's `groupId` references a missing group.
  * - `bad-number:` — a non-finite `x`, `y`, `w`, `h`, or `w ≤ 0`, `h ≤ 0`.
  * - `bad-src:` — a `src` that is present but not a string (T-023).
+ * - `bad-shape:` — a `shape` that is present but not one of the four node
+ *   shapes (T-032).
  */
 export function validateDoc(doc: Doc): string[] {
   const errors: string[] = [];
@@ -133,6 +143,16 @@ export function validateDoc(doc: Doc): string[] {
   for (const [id, node] of Object.entries(doc.nodes)) {
     if (node.src !== undefined && typeof node.src !== 'string') {
       errors.push(`bad-src: node "${id}" has a non-string src`);
+    }
+  }
+
+  // bad-shape: a shape that is not one of the four (T-032). Absent is
+  // valid — it means 'rect' — so pre-shape files never fail here.
+  for (const [id, node] of Object.entries(doc.nodes)) {
+    if (node.shape !== undefined && !VALID_SHAPES.has(node.shape)) {
+      errors.push(
+        `bad-shape: node "${id}" has invalid shape ${JSON.stringify(node.shape)}`,
+      );
     }
   }
 

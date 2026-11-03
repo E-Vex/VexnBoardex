@@ -14,7 +14,7 @@
  * and every repair is reported.
  */
 
-import type { Doc, Node, Edge, Group, Id, NodeKind, Anchor } from './types';
+import type { Doc, Node, Edge, Group, Id, NodeKind, NodeShape, Anchor } from './types';
 import { validateDoc } from './doc';
 
 /** Current file format version. Increment when making breaking changes. */
@@ -140,6 +140,16 @@ export function coerceDoc(obj: unknown): Doc {
         tags: Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === 'string') : [],
         groupId: typeof n.groupId === 'string' ? n.groupId : undefined,
         src: typeof n.src === 'string' ? n.src : undefined,
+        // T-032: the shape passes through when it is one of the four (a
+        // string of any other kind is dropped — validateDoc would only warn
+        // about it, and a migration must produce a valid document).
+        shape:
+          n.shape === 'rect' ||
+          n.shape === 'rounded' ||
+          n.shape === 'diamond' ||
+          n.shape === 'stadium'
+            ? (n.shape as NodeShape)
+            : undefined,
       };
     }
   }

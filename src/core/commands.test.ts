@@ -919,6 +919,109 @@ describe('node.create — image src field (T-023)', () => {
   });
 });
 
+describe('node.create / node.update — flowchart shapes (T-032, M9)', () => {
+  const SHAPES = ['rect', 'rounded', 'diamond', 'stadium'] as const;
+
+  it('node.create accepts each of the four shapes', () => {
+    for (const shape of SHAPES) {
+      const doc = docWith();
+      const patch = compileCommand(doc, {
+        type: 'node.create',
+        node: node(`n-${shape}`, { kind: 'card', shape }),
+      });
+      const next = applyPatch(doc, patch);
+      expect(next.nodes[`n-${shape}`]!.shape).toBe(shape);
+      expect(validateDoc(next)).toEqual([]);
+    }
+  });
+
+  it('node.create rejects an unknown shape', () => {
+    const doc = docWith();
+    expect(() =>
+      compileCommand(doc, {
+        type: 'node.create',
+        node: node('bad', {
+          kind: 'card',
+          shape: 'hexagon' as unknown as Node['shape'],
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('node.update sets the shape for the whole selection in one patch', () => {
+    const doc = docWith(node('a'), node('b'));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a', 'b'],
+      patch: { shape: 'diamond' },
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a']!.shape).toBe('diamond');
+    expect(next.nodes['b']!.shape).toBe('diamond');
+    expect(Object.keys(patch.nodes)).toHaveLength(2);
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('node.update rejects an unknown shape', () => {
+    const doc = docWith(node('a'));
+    expect(() =>
+      compileCommand(doc, {
+        type: 'node.update',
+        ids: ['a'],
+        patch: { shape: 'blob' as unknown as Node['shape'] },
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('a same-shape update is a no-op — empty patch, no history entry (D-22)', () => {
+    const doc = docWith(node('a', { shape: 'diamond' }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { shape: 'diamond' },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('undefined→shape and shape→undefined-equivalent are distinct changes', () => {
+    // Absent and 'rect' are different documents (the renderer draws the
+    // kind's classic outline for absent, sharp corners for 'rect').
+    const doc = docWith(node('a'));
+    const toRect = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { shape: 'rect' },
+    });
+    expect(isEmptyPatch(toRect)).toBe(false);
+    const next = applyPatch(doc, toRect);
+    expect(next.nodes['a']!.shape).toBe('rect');
+  });
+
+  it('do → undo restores the exact previous node (D-09)', () => {
+    const doc = docWith(node('a', { shape: 'stadium' }));
+    const patch = compileCommand(doc, {
+      type: 'node.update',
+      ids: ['a'],
+      patch: { shape: 'diamond' },
+    });
+    const next = applyPatch(doc, patch);
+    const restored = applyPatch(next, invertPatch(patch));
+    expect(restored).toEqual(doc);
+  });
+
+  it('duplicate carries the shape', () => {
+    const doc = docWith(node('a', { kind: 'card', shape: 'rounded' }));
+    const patch = compileCommand(doc, {
+      type: 'node.duplicate',
+      ids: ['a'],
+      newIds: ['a2'],
+      newEdgeIds: [],
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.nodes['a2']!.shape).toBe('rounded');
+  });
+});
+
 describe('node.duplicate — z-order of the copies', () => {
   it('each copy is inserted directly after its original (bottom → top)', () => {
     // order: a, b, c (c on top). Duplicating a and b must give

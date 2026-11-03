@@ -43,6 +43,12 @@ export const NODE_PADDING = 12;
 /** Node corner radius, in world units. */
 export const CORNER_RADIUS = 8;
 
+/**
+ * Corner radius of the `rounded` flowchart shape, in world units (T-032).
+ * Distinctly rounder than the default card corner so the two read apart.
+ */
+export const ROUNDED_SHAPE_RADIUS = 16;
+
 /** Node border width, in world units (a 1-unit border, R6). */
 export const NODE_BORDER_WIDTH = 1;
 

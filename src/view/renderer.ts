@@ -19,7 +19,7 @@
  * nodes in this file — `visibleWorldRect` is used only for culling).
  */
 
-import type { Doc, Node, Edge } from '../core/types';
+import type { Doc, Node, Edge, NodeShape } from '../core/types';
 import { rectContains, rectsIntersect } from '../core/geometry';
 import { edgeEndpoints, nodeRect, anchorPoint } from '../core/edgeGeometry';
 import { groupFrameRect } from '../core/hitTest';
@@ -50,6 +50,7 @@ import {
   SELECTION_OUTLINE_OFFSET,
   SELECTION_OUTLINE_WIDTH,
   STICKY_CORNER_RADIUS,
+  ROUNDED_SHAPE_RADIUS,
   TEXT_NODE_COLOR,
   TEXT_NODE_CORNER_RADIUS,
   EDGE_COLOR,
@@ -92,7 +93,8 @@ export interface Viewport {
 // (The node's bounding rect is built inline where culling needs it.)
 
 /**
- * Draw one node in world coordinates (R6, T-019 kind-specific chrome):
+ * Draw one node in world coordinates (R6, T-019 kind-specific chrome,
+ * T-032 flowchart shapes):
  *
  * - `card`: rounded rectangle filled with the node colour, a 1-unit border,
  *   and text (the classic look).
@@ -100,6 +102,15 @@ export interface Viewport {
  *   drop shadow painted only beneath the note (screen-constant width).
  * - `text`: no fill, no border — just light ink directly on the board.
  * - `image`: filled placeholder rect (the bitmap arrives in T-023).
+ *
+ * The OUTLINE comes from the node's explicit `shape` (T-032), independent
+ * of the kind: `rect` (sharp corners — the flowchart process box),
+ * `rounded`, `stadium` (fully-rounded ends — start/end terminals) or
+ * `diamond` (decision). An ABSENT shape keeps the kind's classic outline
+ * untouched (cards and images CORNER_RADIUS, stickies their smaller
+ * radius), so every pre-shape document renders exactly as before.
+ * Diamond text is laid out inside the inscribed rectangle (half the width
+ * and height) minus padding, so ink never pokes outside the outline.
  *
  * Text is laid out by `layoutText` using `ctx.measureText` — left-aligned,
  * from the top padding, limited to the lines that fit the node height.
@@ -121,6 +132,21 @@ function drawNode(
   const { x: nx, y: ny, w, h } = node;
   const x = nx + dx;
   const y = ny + dy;
+  /** Trace this node's outline (T-032): the explicit shape's geometry, or
+   * the kind's classic outline when no shape is set. Callers begin the path. */
+  const trace = (): void => {
+    if (node.shape === undefined) {
+      // Kind chrome (T-019): stickies are rounder-less, others CORNER_RADIUS.
+      const r = Math.min(
+        node.kind === 'sticky' ? STICKY_CORNER_RADIUS : CORNER_RADIUS,
+        w / 2,
+        h / 2,
+      );
+      roundRect(ctx, x, y, w, h, r);
+    } else {
+      traceNodeOutline(ctx, x, y, w, h, node.shape);
+    }
+  };
 
   if (node.kind !== 'text') {
     // Image nodes paint their bitmap once decoded (T-023); until then the
@@ -128,17 +154,16 @@ function drawNode(
     if (node.kind === 'image' && node.src !== undefined) {
       const img = getImage(node.src);
       if (img !== null) {
-        // Clip to the rounded rect so the bitmap respects the node shape.
-        const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
+        // Clip to the node's outline so the bitmap respects the shape.
         ctx.save();
         ctx.beginPath();
-        roundRect(ctx, x, y, w, h, r);
+        trace();
         ctx.clip();
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
         // A crisp border over the bitmap edge.
         ctx.beginPath();
-        roundRect(ctx, x, y, w, h, r);
+        trace();
         ctx.lineWidth = NODE_BORDER_WIDTH;
         ctx.strokeStyle = NODE_BORDER_COLOR;
         ctx.stroke();
@@ -153,14 +178,12 @@ function drawNode(
       ctx.shadowOffsetY = 3;
       ctx.fillStyle = node.color;
       ctx.beginPath();
-      roundRect(ctx, x, y, w, h, STICKY_CORNER_RADIUS);
+      trace();
       ctx.fill();
       ctx.restore();
     } else {
-      // Rounded rectangle via arcTo (R6), radius clamped to half the shorter side.
-      const r = Math.min(CORNER_RADIUS, w / 2, h / 2);
       ctx.beginPath();
-      roundRect(ctx, x, y, w, h, r);
+      trace();
       ctx.fillStyle = node.color;
       ctx.fill();
       ctx.lineWidth = NODE_BORDER_WIDTH;
@@ -174,8 +197,14 @@ function drawNode(
   if (FONT_SIZE * scale < MIN_TEXT_SIZE) return;
   if (node.text === '') return;
 
-  const innerW = w - NODE_PADDING * 2;
-  const innerH = h - NODE_PADDING * 2;
+  // The text box (T-032): the full bounds minus padding, except for the
+  // diamond, whose ink must stay inside the inscribed rectangle — half the
+  // width and height — so it never pokes outside the outline.
+  const diamond = node.shape === 'diamond';
+  const tx = diamond ? x + w / 4 + NODE_PADDING : x + NODE_PADDING;
+  const ty = diamond ? y + h / 4 + NODE_PADDING : y + NODE_PADDING;
+  const innerW = diamond ? w / 2 - NODE_PADDING * 2 : w - NODE_PADDING * 2;
+  const innerH = diamond ? h / 2 - NODE_PADDING * 2 : h - NODE_PADDING * 2;
   if (innerW <= 0 || innerH <= 0) return;
 
   const lineH = FONT_SIZE * LINE_HEIGHT;
@@ -195,7 +224,51 @@ function drawNode(
     maxLines,
   );
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i]!, x + NODE_PADDING, y + NODE_PADDING + i * lineH);
+    ctx.fillText(lines[i]!, tx, ty + i * lineH);
+  }
+}
+
+/**
+ * Trace one of the four explicit node shapes (T-032) — no fill, no stroke,
+ * so every consumer (fill, border, clip) sees the same geometry:
+ * - `rect`: sharp corners (the flowchart process box).
+ * - `rounded`: ROUNDED_SHAPE_RADIUS, clamped to half the shorter side.
+ * - `stadium`: radius = half the shorter side — fully-rounded ends.
+ * - `diamond`: the four side midpoints as vertices.
+ */
+function traceNodeOutline(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  shape: NodeShape,
+): void {
+  switch (shape) {
+    case 'diamond': {
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      ctx.moveTo(cx, y);
+      ctx.lineTo(x + w, cy);
+      ctx.lineTo(cx, y + h);
+      ctx.lineTo(x, cy);
+      ctx.closePath();
+      break;
+    }
+    case 'stadium':
+      roundRect(ctx, x, y, w, h, Math.min(w, h) / 2);
+      break;
+    case 'rounded':
+      roundRect(ctx, x, y, w, h, Math.min(ROUNDED_SHAPE_RADIUS, w / 2, h / 2));
+      break;
+    case 'rect':
+    default:
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      break;
   }
 }
 
@@ -709,19 +782,23 @@ export function renderBoard(
     // in world space with /scale sizes — DPR- and zoom-safe (T-018).
     if (selected.has(id)) {
       drawHandles(ctx, { x, y, w, h }, m.scale);
-      drawSelectionOutline(
-        ctx,
-        x,
-        y,
-        w,
-        h,
-        m.scale,
-        node.kind === 'sticky'
-          ? STICKY_CORNER_RADIUS
-          : node.kind === 'text'
-            ? TEXT_NODE_CORNER_RADIUS
-            : CORNER_RADIUS,
-      );
+      // The outline's radius follows the outline it hugs (T-032): the kind's
+      // classic radius when no shape is set, else the shape's — sharp for
+      // `rect`, and sharp around a diamond too (its vertices touch the box's
+      // side midpoints, so the inflated box hugs its extremes).
+      const outlineRadius =
+        node.shape === undefined
+          ? node.kind === 'sticky'
+            ? STICKY_CORNER_RADIUS
+            : node.kind === 'text'
+              ? TEXT_NODE_CORNER_RADIUS
+              : CORNER_RADIUS
+          : node.shape === 'rounded'
+            ? ROUNDED_SHAPE_RADIUS
+            : node.shape === 'stadium'
+              ? Math.min(w, h) / 2
+              : 0;
+      drawSelectionOutline(ctx, x, y, w, h, m.scale, outlineRadius);
       // Corner resize handles, single selection only (T-021).
       if (showResizeHandles) {
         drawResizeHandles(ctx, { x, y, w, h }, m.scale);

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { emptyDoc } from './doc';
+import { emptyDoc, validateDoc } from './doc';
 import type { Doc } from './types';
 import { serializeDoc, deserializeDoc, coerceDoc, FILE_VERSION } from './serialize';
 
@@ -194,5 +194,122 @@ describe('serialize — image src field (T-023)', () => {
       edges: {}, groups: {}, order: ['a'],
     });
     expect(bad.nodes['a']!.src).toBeUndefined();
+  });
+});
+
+describe('serialize — node shape field (T-032, M9)', () => {
+  it('round-trips each of the four shapes without warnings', () => {
+    for (const shape of ['rect', 'rounded', 'diamond', 'stadium'] as const) {
+      const doc = emptyDoc();
+      doc.nodes['a'] = {
+        id: 'a',
+        kind: 'card',
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+        text: '',
+        color: '#fff',
+        tags: [],
+        shape,
+      };
+      doc.order = ['a'];
+      const back = deserializeDoc(serializeDoc(doc));
+      expect(back.envelope.doc.nodes['a']!.shape).toBe(shape);
+      expect(back.warnings).toEqual([]);
+    }
+  });
+
+  it('a file whose nodes have no shape loads warning-free (pre-shape files)', () => {
+    const doc = emptyDoc();
+    doc.nodes['a'] = {
+      id: 'a',
+      kind: 'card',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      text: '',
+      color: '#fff',
+      tags: [],
+    };
+    doc.order = ['a'];
+    const back = deserializeDoc(serializeDoc(doc));
+    expect(back.envelope.doc.nodes['a']!.shape).toBeUndefined();
+    expect(back.warnings).toEqual([]);
+  });
+
+  it('deserialize warns about an invalid shape (I-08: report, never hide)', () => {
+    const json = JSON.stringify({
+      app: 'vexboard',
+      version: 1,
+      doc: {
+        nodes: {
+          a: {
+            id: 'a',
+            kind: 'card',
+            x: 0,
+            y: 0,
+            w: 100,
+            h: 100,
+            text: '',
+            color: '#fff',
+            tags: [],
+            shape: 'hexagon',
+          },
+        },
+        edges: {},
+        groups: {},
+        order: ['a'],
+      },
+    });
+    const back = deserializeDoc(json);
+    expect(back.warnings.some((w) => w.includes('bad-shape:'))).toBe(true);
+    // The data is preserved, not dropped (I-08).
+    expect(back.envelope.doc.nodes['a']!.shape).toBe('hexagon');
+  });
+
+  it('coerceDoc preserves a valid shape and drops an invalid one', () => {
+    const good = coerceDoc({
+      nodes: {
+        a: {
+          id: 'a',
+          kind: 'card',
+          x: 0,
+          y: 0,
+          w: 10,
+          h: 10,
+          text: '',
+          color: '#fff',
+          tags: [],
+          shape: 'diamond',
+        },
+      },
+      edges: {},
+      groups: {},
+      order: ['a'],
+    });
+    expect(good.nodes['a']!.shape).toBe('diamond');
+    const bad = coerceDoc({
+      nodes: {
+        a: {
+          id: 'a',
+          kind: 'card',
+          x: 0,
+          y: 0,
+          w: 10,
+          h: 10,
+          text: '',
+          color: '#fff',
+          tags: [],
+          shape: 'blob',
+        },
+      },
+      edges: {},
+      groups: {},
+      order: ['a'],
+    });
+    expect(bad.nodes['a']!.shape).toBeUndefined();
+    expect(validateDoc(bad)).toEqual([]);
   });
 });
