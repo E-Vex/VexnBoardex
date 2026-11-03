@@ -42,6 +42,17 @@ export interface TextEditorOptions {
   uiStore: UiStore;
   /** The parent element for the overlay (default: document.body). */
   parent?: HTMLElement;
+  /**
+   * Claim navigation keys while editing (T-030, mind-map typing cadence).
+   * Called with the key ('Enter' | 'Tab') and the id of the node being
+   * edited, BEFORE the default behavior runs — Enter inserts a newline,
+   * Tab moves focus away (which commits via blur). Modified keys and keys
+   * during IME composition are never offered. Return true to claim the
+   * key: no default behavior runs and the editor does nothing else —
+   * committing the text, growing the tree and reopening the editor are
+   * the claimer's job.
+   */
+  onNavKey?: (key: 'Enter' | 'Tab', nodeId: Id) => boolean;
 }
 
 export interface TextEditor {
@@ -180,6 +191,27 @@ export function createTextEditor(
       e.preventDefault();
       suppressBlurCommit = true;
       close();
+      return;
+    }
+    // T-030: a plain, unmodified Enter/Tab outside IME composition can be
+    // claimed by the host (the mind-map typing cadence: commit the text,
+    // grow the tree, reopen the editor on the new node). The claimer owns
+    // the whole flow — the editor must not add a newline or blur-commit
+    // on top of it. Modified keys (Ctrl/⌘/Alt/Shift) are never claimed, so
+    // multiline text keeps Shift+Enter as a soft newline and Ctrl/⌘+Enter
+    // as an explicit commit, and IME confirmation is never stolen (D-27).
+    if (
+      (e.key === 'Enter' || e.key === 'Tab') &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      !e.isComposing &&
+      editingId !== null &&
+      opts.onNavKey !== undefined &&
+      opts.onNavKey(e.key, editingId)
+    ) {
+      e.preventDefault();
       return;
     }
     // Ctrl/⌘+Enter commits; plain Enter is a newline (multiline text).
