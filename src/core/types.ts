@@ -100,7 +100,15 @@ export type Command =
   | { type: 'group.assign'; groupId: Id; name: string; ids: Id[] }
   | { type: 'group.unassign'; ids: Id[] }
   | { type: 'edge.create'; edge: Edge }
-  | { type: 'edge.delete'; ids: Id[] };
+  | { type: 'edge.delete'; ids: Id[] }
+  /**
+   * A batch of commands compiled as ONE patch (T-029, M9): each sub-command
+   * is compiled against the document produced by the previous ones, and the
+   * sub-patches merge into a single before/after pair per entity — so one
+   * dispatch is one undo step. A gesture that needs several commands (mind
+   * map: create a child node AND its edge) must not be several undo steps.
+   */
+  | { type: 'batch'; commands: Command[] };
 
 /**
  * The editable content fields of a node (T-019, M7): text, colour and tags.
