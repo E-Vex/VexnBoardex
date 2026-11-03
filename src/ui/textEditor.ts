@@ -30,6 +30,7 @@ import {
   LINE_HEIGHT,
   NODE_PADDING,
   NODE_TEXT_COLOR,
+  ROUNDED_SHAPE_RADIUS,
   TEXT_NODE_COLOR,
 } from '../view/theme';
 
@@ -121,7 +122,43 @@ export function createTextEditor(
     // theme changes).
     area.style.width = `${node.w}px`;
     area.style.height = `${node.h}px`;
-    area.style.padding = `${NODE_PADDING}px`;
+    // The overlay mirrors the node's outline (T-032): rounded and stadium
+    // get their radius, the diamond is clipped to its outline and its text
+    // box inset to the inscribed rectangle — the same geometry the canvas
+    // renderer uses, so the editing view matches the committed result.
+    switch (node.shape) {
+      case 'rounded':
+        area.style.borderRadius = `${Math.min(
+          ROUNDED_SHAPE_RADIUS,
+          node.w / 2,
+          node.h / 2,
+        )}px`;
+        area.style.clipPath = '';
+        area.style.padding = `${NODE_PADDING}px`;
+        break;
+      case 'stadium':
+        area.style.borderRadius = `${Math.min(node.w, node.h) / 2}px`;
+        area.style.clipPath = '';
+        area.style.padding = `${NODE_PADDING}px`;
+        break;
+      case 'diamond':
+        area.style.borderRadius = '0px';
+        area.style.clipPath = 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)';
+        area.style.padding = `${node.h / 4 + NODE_PADDING}px ${
+          node.w / 4 + NODE_PADDING
+        }px`;
+        break;
+      case 'rect':
+        area.style.borderRadius = '0px';
+        area.style.clipPath = '';
+        area.style.padding = `${NODE_PADDING}px`;
+        break;
+      default:
+        // No explicit shape: the classic overlay (T-020).
+        area.style.borderRadius = '4px';
+        area.style.clipPath = '';
+        area.style.padding = `${NODE_PADDING}px`;
+    }
     area.style.fontSize = `${FONT_SIZE}px`;
     area.style.lineHeight = String(LINE_HEIGHT);
     area.style.color =
@@ -130,7 +167,6 @@ export function createTextEditor(
     // stay transparent so the board shows through, exactly like the renderer.
     area.style.background =
       node.kind === 'text' ? 'transparent' : node.color;
-    area.style.borderRadius = '4px';
   }
 
   function open(nodeId: Id): void {
