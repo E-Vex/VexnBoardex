@@ -107,6 +107,7 @@ export default tseslint.config(
       'src/input/panController.ts',
       'src/input/keys.ts',
       'src/input/cardCommand.ts',
+      'src/input/mindmap.ts',
       'src/input/selectTool.ts',
     ],
     rules: {
