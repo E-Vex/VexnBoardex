@@ -8,9 +8,10 @@
 
 import type { Command, NodeContentPatch } from './types';
 import type { Doc } from './types';
-import type { Patch } from './types';
+import type { EntityChange, Patch } from './types';
 import type { Anchor, Edge, Id, Node } from './types';
 import { deepEqual } from './deepEqual';
+import { applyPatch } from './patch';
 
 /** Thrown when a command cannot be compiled (PLAN D-22). */
 export class CommandError extends Error {
@@ -726,6 +727,84 @@ function compileEdgeDelete(doc: Doc, ids: Id[]): Patch {
 }
 
 /**
+ * Merge one sub-patch entity map into the running batch map (T-029).
+ *
+ * Per entity the FIRST `before` (undefined = created inside the batch) and
+ * the LAST `after` (undefined = deleted by the end of the batch) survive:
+ * create-then-update collapses to a single create, create-then-delete drops
+ * the entry entirely (nothing happened), delete-then-recreate keeps both
+ * sides. Mutates `target`, which the caller owns.
+ */
+function mergeEntityMap<T>(
+  target: Record<Id, EntityChange<T>>,
+  source: Record<Id, EntityChange<T>>,
+): void {
+  for (const [id, change] of Object.entries(source)) {
+    const first = target[id];
+    if (first === undefined) {
+      target[id] = change;
+      continue;
+    }
+    const merged: EntityChange<T> = {};
+    if (first.before !== undefined) merged.before = first.before;
+    if (change.after !== undefined) merged.after = change.after;
+    if (merged.before !== undefined || merged.after !== undefined) {
+      target[id] = merged;
+    } else {
+      delete target[id];
+    }
+  }
+}
+
+/**
+ * Compile `batch` (T-029, M9): compile every sub-command in order — each
+ * against the document produced by the previous ones — and merge the
+ * sub-patches into ONE patch. One batch dispatch is one undo step: undoing
+ * it restores the exact pre-batch document however many entities the batch
+ * touched. An empty `commands` array compiles to an empty patch; an invalid
+ * sub-command throws `CommandError` (the caller's document is untouched —
+ * the store compiles before applying). Nested batches work: a batch is
+ * itself just a command.
+ */
+function compileBatch(doc: Doc, commands: Command[]): Patch {
+  if (!Array.isArray(commands)) {
+    throw new CommandError('batch: commands is not an array');
+  }
+  let current: Doc = doc;
+  const nodes: Patch['nodes'] = {};
+  const edges: Patch['edges'] = {};
+  const groups: Patch['groups'] = {};
+  let order: { before: Id[]; after: Id[] } | undefined;
+
+  for (const command of commands) {
+    if (command === null || typeof command !== 'object') {
+      throw new CommandError('batch: a sub-command is not an object');
+    }
+    const patch = compileCommand(current, command);
+    current = applyPatch(current, patch);
+    mergeEntityMap(nodes, patch.nodes);
+    mergeEntityMap(edges, patch.edges);
+    mergeEntityMap(groups, patch.groups);
+    if (patch.order !== undefined) {
+      order = {
+        before: order?.before ?? patch.order.before,
+        after: patch.order.after,
+      };
+    }
+  }
+
+  // A batch whose net order change is a no-op (create then delete) carries
+  // no order entry at all (D-22: no-op → empty patch parts).
+  if (order !== undefined && deepEqual(order.before, order.after)) {
+    order = undefined;
+  }
+
+  return order === undefined
+    ? { nodes, edges, groups }
+    : { nodes, edges, groups, order };
+}
+
+/**
  * Compile a command into a patch (T-006 R5, PLAN D-22).
  *
  * Pure and strict: never mutates `doc` or `command`. Throws `CommandError`
@@ -755,6 +834,8 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':
       return compileEdgeDelete(doc, command.ids);
+    case 'batch':
+      return compileBatch(doc, command.commands);
     default:
       throw new CommandError(
         `unknown command type: ${(command as { type: string }).type}`,

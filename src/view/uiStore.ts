@@ -55,8 +55,17 @@ export interface ResizePreview {
   h: number;
 }
 
+/**
+ * The interaction mode (T-029, M9). `select` is the free-form board;
+ * `mindmap` layers the tree behaviour (Tab = child, Enter = sibling) on the
+ * SAME document model (D-14). UI-only — never saved, never in history
+ * (I-05).
+ */
+export type Mode = 'select' | 'mindmap';
+
 /** The UI state layer (D-25): selection ids, the active previews, the node
- * being text-edited, the active tag filter and the box-select rect. */
+ * being text-edited, the active tag filter, the box-select rect and the
+ * interaction mode. */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
@@ -69,6 +78,8 @@ export interface UiState {
    * dimmed by the renderer. UI-only — never saved (I-05). */
   tagFilter: string[];
   boxSelect: BoxSelectRect | null;
+  /** The interaction mode (T-029): 'select' (free-form) or 'mindmap'. */
+  mode: Mode;
 }
 
 export interface UiStore {
@@ -88,6 +99,8 @@ export interface UiStore {
   setTagFilter(tags: string[]): void;
   /** Replace the box-select rect (null = no box-select). No notification when equal. */
   setBoxSelect(rect: BoxSelectRect | null): void;
+  /** Replace the interaction mode (T-029). No notification when equal. */
+  setMode(mode: Mode): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
   subscribe(fn: (state: UiState) => void): () => void;
 }
@@ -140,7 +153,8 @@ function sameUiState(a: UiState, b: UiState): boolean {
     a.editing === b.editing &&
     sameResize(a.resize, b.resize) &&
     sameIds(a.tagFilter, b.tagFilter) &&
-    sameBoxSelect(a.boxSelect, b.boxSelect)
+    sameBoxSelect(a.boxSelect, b.boxSelect) &&
+    a.mode === b.mode
   );
 }
 
@@ -154,7 +168,7 @@ function sameResize(a: ResizePreview | null, b: ResizePreview | null): boolean {
 /**
  * Create a UI store initialised to all-empty UI state
  * `{ selection: [], drag: null, connect: null, editing: null, resize: null,
- *    boxSelect: null }`.
+ *    boxSelect: null, mode: 'select' }`.
  */
 export function createUiStore(): UiStore {
   let current: UiState = {
@@ -165,6 +179,7 @@ export function createUiStore(): UiStore {
     resize: null,
     tagFilter: [],
     boxSelect: null,
+    mode: 'select',
   };
   const subscribers = new Set<(state: UiState) => void>();
 
@@ -202,6 +217,9 @@ export function createUiStore(): UiStore {
     },
     setBoxSelect(rect: BoxSelectRect | null) {
       patch({ boxSelect: rect });
+    },
+    setMode(mode: Mode) {
+      patch({ mode });
     },
     subscribe(fn: (state: UiState) => void): () => void {
       subscribers.add(fn);

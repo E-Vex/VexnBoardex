@@ -27,9 +27,9 @@ function docOf(...ids: string[]): Doc {
 }
 
 describe('createUiStore — initial state (R3)', () => {
-  it('starts with an empty selection and no drag', () => {
+  it('starts with an empty selection, no drag and select mode', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null });
+    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select' });
   });
 });
 
@@ -49,6 +49,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
   });
 
@@ -92,6 +93,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       resize: null,
       tagFilter: [],
       boxSelect: null,
+      mode: 'select',
     });
   });
 });
@@ -150,7 +152,7 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null });
+    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select' });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
@@ -258,5 +260,42 @@ describe('setTagFilter — the active tag filter (T-022)', () => {
     store.setTagFilter([]);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(store.get().tagFilter).toEqual([]);
+  });
+});
+
+describe('setMode — the interaction mode (T-029)', () => {
+  it('starts in select mode', () => {
+    const store = createUiStore();
+    expect(store.get().mode).toBe('select');
+  });
+
+  it('switching to mindmap notifies and keeps everything else', () => {
+    const store = createUiStore();
+    store.setSelection(['a']);
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setMode('mindmap');
+    expect(store.get().mode).toBe('mindmap');
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(store.get().selection).toEqual(['a']);
+  });
+
+  it('setting the same mode again does not notify', () => {
+    const store = createUiStore();
+    store.setMode('mindmap');
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setMode('mindmap');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('switching back to select notifies', () => {
+    const store = createUiStore();
+    store.setMode('mindmap');
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setMode('select');
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(store.get().mode).toBe('select');
   });
 });

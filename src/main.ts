@@ -15,6 +15,7 @@ import { createCursorTracker } from './input/cursor';
 import { attachNodeInput } from './input/nodeInput';
 import { attachSelectInput } from './input/selectInput';
 import { attachConnectInput } from './input/connectInput';
+import { attachMindMapInput } from './input/mindMapInput';
 import { createHud } from './ui/hud';
 import { createTextEditor } from './ui/textEditor';
 import { createInspector } from './ui/inspector';
@@ -69,7 +70,7 @@ const host = createCanvasHost(({ ctx, width, height }) => {
 // (so the HUD world-coords stay in sync without a redraw).
 const hud = createHud();
 
-/** Refresh every HUD line from the three stores (T-008 R7). */
+/** Refresh every HUD line from the three stores (T-008 R7, T-029). */
 function refreshHud(): void {
   hud.update(
     store.get(),
@@ -77,6 +78,7 @@ function refreshHud(): void {
     docStore.get().order.length,
     uiStore.get().selection.length,
     docStore.getRevision(),
+    uiStore.get().mode,
   );
 }
 
@@ -167,6 +169,20 @@ const connectInput = attachConnectInput({
   isPanActive: () => input.isPanning() || input.isSpaceHeld(),
 });
 
+// Mind-map input (T-029, M9): Tab = child, Enter = sibling — active only in
+// `mindmap` mode, checked inside the handler (the mode is UI state, I-05).
+const mindMapInput = attachMindMapInput({
+  docStore,
+  uiStore,
+  cameraStore: store,
+  getViewportSize: () => ({
+    width: host.canvas.clientWidth,
+    height: host.canvas.clientHeight,
+  }),
+  newId: () => crypto.randomUUID(),
+  editNode: (id) => textEditor.edit(id),
+});
+
 // --- Autosave (T-013, T-018) ---
 // Create autosaver that saves on every doc/view change.
 const autosaver = createAutosaver();
@@ -229,7 +245,12 @@ window.addEventListener('keydown', (e) => {
   const shift = e.shiftKey;
 
   // Enter / F2 with exactly one node selected opens the text editor (T-020).
-  if ((e.key === 'Enter' || e.key === 'F2') && !mod) {
+  // In mind-map mode plain Enter grows a sibling instead (T-029) — the
+  // mind-map handler owns Enter; F2 and double-click still open the editor.
+  const editKey =
+    e.key === 'F2' ||
+    (e.key === 'Enter' && uiStore.get().mode !== 'mindmap');
+  if (editKey && !mod) {
     const selection = uiStore.get().selection;
     if (selection.length === 1 && !textEditor.isOpen()) {
       e.preventDefault();
@@ -378,6 +399,8 @@ function createToolbar(): void {
     text: string;
     onClick: () => void;
     isDisabled?: () => boolean;
+    /** Dynamic label (T-029): re-read on every store change. */
+    getText?: () => string;
   };
 
   const buttons: { element: HTMLButtonElement; config: ButtonConfig }[] = [];
@@ -394,6 +417,17 @@ function createToolbar(): void {
 
   makeBtn({ text: '↶ Undo', onClick: () => docStore.undo(), isDisabled: () => !docStore.canUndo() });
   makeBtn({ text: '↷ Redo', onClick: () => docStore.redo(), isDisabled: () => !docStore.canRedo() });
+
+  // M9 (T-029): toggle between the free-form board and mind-map mode. The
+  // label shows the CURRENT mode; one click switches.
+  makeBtn({
+    text: 'Mode: Select',
+    getText: () =>
+      uiStore.get().mode === 'mindmap' ? 'Mode: Mind Map' : 'Mode: Select',
+    onClick: () => {
+      uiStore.setMode(uiStore.get().mode === 'mindmap' ? 'select' : 'mindmap');
+    },
+  });
 
   // M7 (T-019): create nodes of each kind at the viewport centre.
   const addNode = (kind: NodeKind) => {
@@ -559,6 +593,9 @@ function createToolbar(): void {
       if (config.isDisabled) {
         element.disabled = config.isDisabled();
       }
+      if (config.getText) {
+        element.textContent = config.getText();
+      }
     }
   };
 
@@ -578,3 +615,4 @@ void input;
 void nodeInput;
 void selectInput;
 void connectInput;
+void mindMapInput;

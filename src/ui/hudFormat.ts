@@ -8,8 +8,9 @@
 
 import type { Point } from '../core/geometry';
 import { type Camera, screenToWorld } from '../view/camera';
+import type { Mode } from '../view/uiStore';
 
-/** The seven strings the HUD overlay shows. */
+/** The eight strings the HUD overlay shows. */
 export interface HudStrings {
   zoom: string;
   cam: string;
@@ -21,6 +22,8 @@ export interface HudStrings {
   selected: string;
   /** The doc store revision as a plain integer string (T-008 R7, D-29). */
   rev: string;
+  /** The interaction mode, verbatim (T-029): "select" or "mindmap". */
+  mode: string;
 }
 
 const DASH = '—';
@@ -55,8 +58,9 @@ function fmtZoom(z: number): string {
 }
 
 /**
- * Returns the seven HUD strings for the given camera, cursor position,
- * node count, selection count and doc revision (T-007 R9, T-008 R7).
+ * Returns the eight HUD strings for the given camera, cursor position,
+ * node count, selection count, doc revision and interaction mode (T-007
+ * R9, T-008 R7, T-029).
  *
  * - `zoom`: integer percent ("100%").
  * - `cam`: "x, y" with one decimal.
@@ -66,6 +70,7 @@ function fmtZoom(z: number): string {
  * - `nodes`: the node count as a plain integer ("0", "1", …).
  * - `selected`: the selection count as a plain integer.
  * - `rev`: the doc store revision as a plain integer.
+ * - `mode`: the interaction mode, verbatim ("select" / "mindmap").
  *
  * "-0.0" and "-0" are never output; they are normalized to "0.0" / "0".
  */
@@ -75,6 +80,7 @@ export function formatHud(
   nodeCount: number,
   selectedCount: number,
   revision: number,
+  mode: Mode = 'select',
 ): HudStrings {
   const zoom = fmtZoom(camera.zoom);
   const cam = `${fmt1(camera.x)}, ${fmt1(camera.y)}`;
@@ -83,7 +89,7 @@ export function formatHud(
   const rev = fmtInt(revision);
 
   if (cursorScreen === null) {
-    return { zoom, cam, world: DASH, screen: DASH, nodes, selected, rev };
+    return { zoom, cam, world: DASH, screen: DASH, nodes, selected, rev, mode };
   }
 
   const world = screenToWorld(camera, cursorScreen);
@@ -95,5 +101,6 @@ export function formatHud(
     nodes,
     selected,
     rev,
+    mode,
   };
 }
