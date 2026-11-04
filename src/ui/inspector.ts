@@ -1,16 +1,16 @@
 /**
  * Inspector panel (T-022, M7) — a DOM panel at the top right, shown while
- * nodes are selected: a colour swatch row, a shape picker (T-032, M9) and
- * a tag editor.
+ * nodes or edges are selected: a colour swatch row, a shape picker (T-032,
+ * M9) and a tag editor for nodes; a route picker (T-033, M9) for edges.
  *
- * Every change goes through ONE `node.update` command for the whole
- * selection (I-03): recolouring five nodes is one undo step; adding a tag
- * to the selection is one undo step; removing a tag likewise. The panel
- * itself owns no state — it re-reads doc + selection on every notification.
+ * Every change goes through ONE command for the whole selection (I-03):
+ * recolouring five nodes is one undo step; re-routing two edges likewise
+ * (`edge.update`). The panel itself owns no state — it re-reads doc +
+ * selection on every notification.
  */
 
 import type { DocStore } from '../core/store';
-import type { NodeShape } from '../core/types';
+import type { Edge, EdgeRoute, Node, NodeShape } from '../core/types';
 import type { UiStore } from '../view/uiStore';
 
 /** The preset swatch colours (M7). */
@@ -31,6 +31,13 @@ const SHAPES: { value: NodeShape; label: string }[] = [
   { value: 'rounded', label: 'Rounded' },
   { value: 'diamond', label: 'Diamond' },
   { value: 'stadium', label: 'Stadium' },
+];
+
+/** The three routes offered by the picker (T-033, M9). */
+const ROUTES: { value: EdgeRoute; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'straight', label: 'Straight' },
+  { value: 'orthogonal', label: 'Orthogonal' },
 ];
 
 const PANEL_STYLE = `
@@ -90,13 +97,28 @@ export function createInspector(
     const nodes = ui.selection
       .map((id) => doc.nodes[id])
       .filter((n): n is NonNullable<typeof n> => n !== undefined);
+    const edges = ui.edgeSelection
+      .map((id) => doc.edges[id])
+      .filter((e): e is NonNullable<typeof e> => e !== undefined);
 
     root.innerHTML = '';
-    if (nodes.length === 0) {
+    if (nodes.length === 0 && edges.length === 0) {
       root.style.display = 'none';
       return;
     }
     root.style.display = 'flex';
+
+    // The selections are mutually exclusive (T-033); nodes take the panel
+    // they always had, edges get the route picker.
+    if (nodes.length > 0) {
+      renderNodeSections(nodes);
+      return;
+    }
+    renderEdgeSection(edges);
+  }
+
+  /** The classic node panel: swatches, shape picker, tags. */
+  function renderNodeSections(nodes: Node[]): void {
 
     // ── Colour swatches ──────────────────────────────────────────────────
     const colorLabel = document.createElement('div');
@@ -251,6 +273,43 @@ export function createInspector(
       input.value = '';
     };
     root.appendChild(input);
+  }
+
+  /** The edge panel (T-033): one route picker, one `edge.update` for the
+   * whole edge selection — the same one-command-one-undo rule the node
+   * sections follow. The active button is the route EVERY selected edge
+   * effectively takes (an absent route IS 'auto'). */
+  function renderEdgeSection(edges: Edge[]): void {
+    const routeLabel = document.createElement('div');
+    routeLabel.textContent = 'Edge route';
+    routeLabel.style.opacity = '0.7';
+    root.appendChild(routeLabel);
+
+    const routeRow = document.createElement('div');
+    routeRow.style.cssText = 'display: flex; gap: 6px; flex-wrap: wrap;';
+    for (const { value, label } of ROUTES) {
+      // An absent route means 'auto' (I-08) — the effective route decides
+      // which button reads as active.
+      const active = edges.every((e) => (e.route ?? 'auto') === value);
+      const btn = document.createElement('button');
+      btn.dataset.testid = `route-${value}`;
+      btn.textContent = label;
+      btn.title = value;
+      btn.style.cssText =
+        SHAPE_BUTTON_STYLE +
+        (active
+          ? '; border-color: #ffffff; background: rgba(255, 255, 255, 0.25);'
+          : '');
+      btn.onclick = () => {
+        docStore.dispatch({
+          type: 'edge.update',
+          ids: [...uiStore.get().edgeSelection],
+          patch: { route: value },
+        });
+      };
+      routeRow.appendChild(btn);
+    }
+    root.appendChild(routeRow);
   }
 
   // The × on a chip removes the tag from all selected nodes that have it.
