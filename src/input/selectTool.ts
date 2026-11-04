@@ -21,6 +21,11 @@
  *   mid-drag camera changes stay correct.
  * - Pointer-up at the end of a box-select emits `selectInRect` (the final
  *   screen-space rect); the DOM glue resolves it against the document.
+ * - T-033: a press on an EDGE (no node/handle hit) selects it — Shift
+ *   toggles it in the edge selection — and NO gesture starts. Node and
+ *   edge selections are mutually exclusive: each side clears the other.
+ *   A press on empty space clears both; a box-select resolves to nodes only
+ *   and clears the edge selection too.
  * - Under the threshold, pointer-up is a click: no command.
  * - `Escape`, `pointercancel` and `blur` cancel a gesture with no command.
  * - `Delete`/`Backspace` (idle only, selection non-empty) dispatch one
@@ -81,6 +86,9 @@ export type SelectEvent =
       /** The members of the pressed node's group, including itself (T-024):
        * dragging a group member drags the whole group. [] when ungrouped. */
       groupIds?: Id[];
+      /** The edge under the press, when no node/handle is (T-033). The DOM
+       * glue resolves it with `edgeAt`; the machine just consumes the id. */
+      hitEdgeId?: Id | null;
     }
   | { type: 'pointerMove'; pointerId: number; screen: Point; world: Point }
   | { type: 'pointerUp'; pointerId: number; screen: Point; world: Point }
@@ -91,6 +99,7 @@ export type SelectEvent =
 /** Effects the DOM glue applies (R4). */
 export type SelectEffect =
   | { type: 'select'; ids: Id[] }
+  | { type: 'selectEdge'; ids: Id[] }
   | { type: 'setDrag'; drag: DragPreview | null }
   | { type: 'dispatch'; command: Command }
   | { type: 'setBoxSelect'; rect: { x: number; y: number; w: number; h: number } | null }
@@ -105,9 +114,11 @@ export type SelectEffect =
       rect: { id: Id; x: number; y: number; w: number; h: number } | null;
     };
 
-/** Per-event context: the current selection (read from the UI store). */
+/** Per-event context: the current selections, read from the UI store. */
 export interface SelectCtx {
   selection: Id[];
+  /** The selected edge ids (T-033). */
+  edgeSelection: Id[];
 }
 
 export interface SelectResult {
@@ -290,6 +301,11 @@ export function reduce(
           effects.push({ type: 'select', ids: [event.hitId] });
           dragIds = unionIds([event.hitId], groupIds);
         }
+        // Selecting a node always clears the edge selection (mutual
+        // exclusivity, T-033) — a plain click replaces it.
+        if (ctx.edgeSelection.length > 0 && !event.shiftKey) {
+          effects.push({ type: 'selectEdge', ids: [] });
+        }
         return {
           state: {
             mode: 'pressed',
@@ -305,12 +321,37 @@ export function reduce(
         };
       }
 
+      // T-033: a press on an edge (nothing else hit) selects it — Shift
+      // toggles it in the edge selection — and NO gesture starts (edges are
+      // not draggable). The node selection is cleared so the two never mix.
+      if (event.hitEdgeId !== null && event.hitEdgeId !== undefined) {
+        const effects: SelectEffect[] = [];
+        if (ctx.selection.length > 0) {
+          effects.push({ type: 'select', ids: [] });
+        }
+        if (event.shiftKey) {
+          const newEdges = ctx.edgeSelection.includes(event.hitEdgeId)
+            ? ctx.edgeSelection.filter((id) => id !== event.hitEdgeId)
+            : [...ctx.edgeSelection, event.hitEdgeId];
+          effects.push({ type: 'selectEdge', ids: newEdges });
+        } else {
+          effects.push({ type: 'selectEdge', ids: [event.hitEdgeId] });
+        }
+        return { state: idle(), effects };
+      }
+
       // Press on empty space: start a box-select marquee (T-017: always,
       // whether or not anything is selected). The selection is cleared up
-      // front when non-empty; the marquee's pointer-up then selects whatever
-      // intersects the rect (nothing for a click-sized rect).
-      const effects: SelectEffect[] =
-        ctx.selection.length > 0 ? [{ type: 'select', ids: [] }] : [];
+      // front when non-empty — node AND edge alike (T-033); the marquee's
+      // pointer-up then selects whatever intersects the rect (nothing for a
+      // click-sized rect).
+      const effects: SelectEffect[] = [];
+      if (ctx.selection.length > 0) {
+        effects.push({ type: 'select', ids: [] });
+      }
+      if (ctx.edgeSelection.length > 0) {
+        effects.push({ type: 'selectEdge', ids: [] });
+      }
       const rect = marqueeRect(event.screen, event.screen);
       return {
         state: {
@@ -386,14 +427,18 @@ export function reduce(
       if (state.mode === 'boxSelecting') {
         // Finalize the box-select: emit the final marquee rect; the DOM glue
         // resolves it against the document and sets the selection (T-017).
+        // A box-select resolves to nodes only, so the edge selection goes
+        // too (T-033).
         const rect = marqueeRect(state.startScreen!, event.screen);
-        return {
-          state: idle(),
-          effects: [
-            { type: 'setBoxSelect', rect: null },
-            { type: 'selectInRect', rect },
-          ],
-        };
+        const effects: SelectEffect[] = [];
+        if (ctx.edgeSelection.length > 0) {
+          effects.push({ type: 'selectEdge', ids: [] });
+        }
+        effects.push(
+          { type: 'setBoxSelect', rect: null },
+          { type: 'selectInRect', rect },
+        );
+        return { state: idle(), effects };
       }
 
       if (state.mode === 'resizing') {
@@ -471,8 +516,21 @@ export function reduce(
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         // Delete/Backspace while a gesture is active is ignored (R4); with
-        // an empty selection there is nothing to delete (D-27).
+        // nothing selected there is nothing to delete (D-27).
         if (state.mode !== 'idle') return { state, effects: [] };
+        // T-033: with edges selected (and no nodes), ONE edge.delete removes
+        // them all — the same one-command-one-undo rule nodes follow.
+        if (ctx.selection.length === 0 && ctx.edgeSelection.length > 0) {
+          return {
+            state,
+            effects: [
+              {
+                type: 'dispatch',
+                command: { type: 'edge.delete', ids: [...ctx.edgeSelection] },
+              },
+            ],
+          };
+        }
         if (ctx.selection.length === 0) return { state, effects: [] };
         return {
           state,

@@ -12,8 +12,8 @@ import {
   reduce,
 } from './selectTool';
 
-const NO_SELECTION: SelectCtx = { selection: [] };
-const SEL_A: SelectCtx = { selection: ['a'] };
+const NO_SELECTION: SelectCtx = { selection: [], edgeSelection: [] };
+const SEL_A: SelectCtx = { selection: ['a'], edgeSelection: [] };
 
 /** A screen-space point. */
 function p(x: number, y: number): { x: number; y: number } {
@@ -319,7 +319,7 @@ describe('selectTool — cancel paths produce no command (D-26)', () => {
 
 describe('selectTool — keys (D-27)', () => {
   it('Delete with a selection dispatches one node.delete', () => {
-    const r = run(initialSelectState(), keyEvent('Delete'), { selection: ['a', 'b'] });
+    const r = run(initialSelectState(), keyEvent('Delete'), { selection: ['a', 'b'], edgeSelection: [] });
     expect(r.effects).toEqual([
       { type: 'dispatch', command: { type: 'node.delete', ids: ['a', 'b'] } },
     ]);
@@ -462,7 +462,7 @@ describe('selectTool — box-select lifecycle (T-017)', () => {
 });
 
 describe('selectTool — group move (T-017)', () => {
-  const SEL_AB: SelectCtx = { selection: ['a', 'b'] };
+  const SEL_AB: SelectCtx = { selection: ['a', 'b'], edgeSelection: [] };
 
   /** A pressed state on node 'b' while ['a','b'] is selected. */
   function pressedOnBInAB(): SelectState {
@@ -517,7 +517,7 @@ describe('selectTool — group move (T-017)', () => {
       SEL_AB,
     ).state;
     expect(st.dragIds).toEqual(['b']);
-    const r = run(st, move(p(300, 330), p(-340, -30)), { selection: ['a'] });
+    const r = run(st, move(p(300, 330), p(-340, -30)), { selection: ['a'], edgeSelection: [] });
     expect(ofType(r.effects, 'setDrag')).toEqual([
       { type: 'setDrag', drag: { ids: ['b'], dx: 0, dy: 100 } },
     ]);
@@ -528,7 +528,7 @@ describe('selectTool — group move (T-017)', () => {
     const st = run(
       initialSelectState(),
       down(p(300, 230), p(-340, -130), 'b', 1, 0, true),
-      { selection: ['a'] },
+      { selection: ['a'], edgeSelection: [] },
     ).state;
     expect(st.dragIds).toEqual(['a', 'b']);
   });
@@ -638,5 +638,114 @@ describe('resizeRect — geometry (T-021)', () => {
   it('ne and sw each move one edge only', () => {
     expect(resizeRect(orig, 'ne', { x: 200, y: 0 })).toEqual({ x: 10, y: 0, w: 190, h: 70 });
     expect(resizeRect(orig, 'sw', { x: 0, y: 100 })).toEqual({ x: 0, y: 20, w: 110, h: 80 });
+  });
+});
+
+// --- T-033: edge selection ---
+
+describe('selectTool — edge selection (T-033)', () => {
+  /** A pointerDown that hit nothing but an edge. */
+  function downEdge(edgeId: string, shiftKey = false, button = 0, pointerId = 1) {
+    return {
+      type: 'pointerDown' as const,
+      button,
+      pointerId,
+      screen: p(50, 50),
+      world: p(-10, -10),
+      hitId: null,
+      shiftKey,
+      resize: null,
+      groupIds: [],
+      hitEdgeId: edgeId,
+    };
+  }
+
+  it('a plain press on an edge selects only that edge, and no gesture starts', () => {
+    const r = run(initialSelectState(), downEdge('e1'), SEL_A);
+    expect(ofType(r.effects, 'selectEdge')).toEqual([{ type: 'selectEdge', ids: ['e1'] }]);
+    // The node selection is cleared (mutual exclusivity).
+    expect(ofType(r.effects, 'select')).toEqual([{ type: 'select', ids: [] }]);
+    // No gesture: the machine stays idle (no marquee, no drag).
+    expect(r.state.mode).toBe('idle');
+  });
+
+  it('the node selection is not re-cleared when it is already empty', () => {
+    const r = run(initialSelectState(), downEdge('e1'), NO_SELECTION);
+    expect(ofType(r.effects, 'select')).toEqual([]);
+    expect(ofType(r.effects, 'selectEdge')).toEqual([{ type: 'selectEdge', ids: ['e1'] }]);
+  });
+
+  it('shift adds the edge to the edge selection', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1'] };
+    const r = run(initialSelectState(), downEdge('e2', true), ctx);
+    expect(ofType(r.effects, 'selectEdge')).toEqual([
+      { type: 'selectEdge', ids: ['e1', 'e2'] },
+    ]);
+  });
+
+  it('shift on an already-selected edge removes it', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1', 'e2'] };
+    const r = run(initialSelectState(), downEdge('e1', true), ctx);
+    expect(ofType(r.effects, 'selectEdge')).toEqual([
+      { type: 'selectEdge', ids: ['e2'] },
+    ]);
+  });
+
+  it('a plain press on a node clears a non-empty edge selection', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1'] };
+    const r = run(initialSelectState(), down(p(10, 10), p(-5, -5), 'a'), ctx);
+    expect(ofType(r.effects, 'selectEdge')).toEqual([{ type: 'selectEdge', ids: [] }]);
+    expect(r.state.mode).toBe('pressed'); // the node drag gesture still starts
+  });
+
+  it('a press on empty space clears the edge selection and starts a marquee', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1'] };
+    const r = run(
+      initialSelectState(),
+      { type: 'pointerDown', button: 0, pointerId: 1, screen: p(10, 10), world: p(-5, -5), hitId: null, shiftKey: false, resize: null, groupIds: [], hitEdgeId: null },
+      ctx,
+    );
+    expect(ofType(r.effects, 'selectEdge')).toEqual([{ type: 'selectEdge', ids: [] }]);
+    expect(ofType(r.effects, 'setBoxSelect').length).toBe(1);
+    expect(r.state.mode).toBe('boxSelecting');
+  });
+
+  it('a finished box-select clears the edge selection', () => {
+    // Marquee from (10,10) to (300,300) with an edge selected.
+    const st = run(
+      initialSelectState(),
+      { type: 'pointerDown', button: 0, pointerId: 1, screen: p(10, 10), world: p(-5, -5), hitId: null, shiftKey: false, resize: null, groupIds: [], hitEdgeId: null },
+      { selection: [], edgeSelection: [] },
+    ).state;
+    const r = run(st, up(p(300, 300), p(50, 50)), { selection: [], edgeSelection: ['e1'] });
+    expect(ofType(r.effects, 'selectEdge')).toEqual([{ type: 'selectEdge', ids: [] }]);
+    expect(ofType(r.effects, 'selectInRect').length).toBe(1);
+  });
+
+  it('Delete with only edges selected dispatches ONE edge.delete', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1', 'e2'] };
+    const r = run(initialSelectState(), keyEvent('Delete'), ctx);
+    expect(ofType(r.effects, 'dispatch')).toEqual([
+      { type: 'dispatch', command: { type: 'edge.delete', ids: ['e1', 'e2'] } },
+    ]);
+  });
+
+  it('Delete with nothing selected still dispatches nothing', () => {
+    const r = run(initialSelectState(), keyEvent('Delete'), NO_SELECTION);
+    expect(r.effects).toEqual([]);
+  });
+
+  it('Delete prefers the node selection when both somehow hold ids', () => {
+    const ctx: SelectCtx = { selection: ['a'], edgeSelection: ['e1'] };
+    const r = run(initialSelectState(), keyEvent('Delete'), ctx);
+    expect(ofType(r.effects, 'dispatch')).toEqual([
+      { type: 'dispatch', command: { type: 'node.delete', ids: ['a'] } },
+    ]);
+  });
+
+  it('arrow keys never move edges (no node selection → no-op)', () => {
+    const ctx: SelectCtx = { selection: [], edgeSelection: ['e1'] };
+    const r = run(initialSelectState(), keyEvent('ArrowUp'), ctx);
+    expect(r.effects).toEqual([]);
   });
 });
