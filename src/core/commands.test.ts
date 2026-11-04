@@ -666,6 +666,168 @@ describe('edge.delete — removes the listed edges', () => {
   });
 });
 
+// --- T-033: edge.create route validation ---
+
+describe('edge.create — optional route (T-033)', () => {
+  it('each of the three routes is accepted and stored', () => {
+    const doc = docWith(node('n1'), node('n2'));
+    for (const route of ['auto', 'straight', 'orthogonal'] as const) {
+      const next = applyPatch(
+        doc,
+        compileCommand(doc, {
+          type: 'edge.create',
+          edge: edge('e1', 'n1', 'n2', { route }),
+        }),
+      );
+      expect(next.edges.e1!.route).toBe(route);
+      expect(validateDoc(next)).toEqual([]);
+    }
+  });
+
+  it('absent route stays absent (pre-route files are unchanged)', () => {
+    const next = applyPatch(
+      docWith(node('n1'), node('n2')),
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2'),
+      }),
+    );
+    expect('route' in next.edges.e1!).toBe(false);
+  });
+
+  it('an invalid route throws', () => {
+    expect(() =>
+      compileCommand(docWith(node('n1'), node('n2')), {
+        type: 'edge.create',
+        edge: edge('e1', 'n1', 'n2', {
+          route: 'curved' as Edge['route'],
+        }),
+      }),
+    ).toThrow(CommandError);
+  });
+});
+
+// --- T-033: edge.update ---
+
+describe('edge.update — route content patch (T-033, M9)', () => {
+  function docWithEdges(): Doc {
+    const doc = docWith(node('n1'), node('n2'), node('n3'));
+    doc.edges = {
+      e1: edge('e1', 'n1', 'n2'),
+      e2: edge('e2', 'n2', 'n3', { label: 'link' }),
+    };
+    return doc;
+  }
+
+  it('changes the route of every listed edge in one patch', () => {
+    const doc = deepFreeze(docWithEdges());
+    const patch = compileCommand(doc, {
+      type: 'edge.update',
+      ids: ['e1', 'e2'],
+      patch: { route: 'orthogonal' },
+    });
+    expect(patch.edges.e1).toEqual({
+      before: doc.edges.e1,
+      after: { ...doc.edges.e1, route: 'orthogonal' },
+    });
+    expect(patch.edges.e2).toEqual({
+      before: doc.edges.e2,
+      after: { ...doc.edges.e2, route: 'orthogonal' },
+    });
+    expect(patch.nodes).toEqual({});
+    expect(patch.groups).toEqual({});
+    expect(patch.order).toBeUndefined();
+  });
+
+  it('the label and endpoints are untouched', () => {
+    const next = applyPatch(
+      docWithEdges(),
+      compileCommand(docWithEdges(), {
+        type: 'edge.update',
+        ids: ['e2'],
+        patch: { route: 'straight' },
+      }),
+    );
+    expect(next.edges.e2!.label).toBe('link');
+    expect(next.edges.e2!.from).toEqual({ node: 'n2', anchor: 'auto' });
+    expect(next.edges.e2!.to).toEqual({ node: 'n3', anchor: 'auto' });
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('undo (invertPatch) restores the previous doc exactly', () => {
+    const doc = docWithEdges();
+    const patch = compileCommand(doc, {
+      type: 'edge.update',
+      ids: ['e1', 'e2'],
+      patch: { route: 'auto' },
+    });
+    const next = applyPatch(doc, patch);
+    const restored = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(restored, doc)).toBe(true);
+  });
+
+  it('an explicit auto on an absent route IS a change (node.update shape semantics)', () => {
+    const doc = docWithEdges();
+    const patch = compileCommand(doc, {
+      type: 'edge.update',
+      ids: ['e1'],
+      patch: { route: 'auto' },
+    });
+    expect(Object.keys(patch.edges)).toEqual(['e1']);
+    const next = applyPatch(doc, patch);
+    expect(next.edges.e1!.route).toBe('auto');
+  });
+
+  it('a patch that changes nothing compiles to an empty patch', () => {
+    const doc = docWithEdges();
+    doc.edges.e1!.route = 'orthogonal';
+    const patch = compileCommand(doc, {
+      type: 'edge.update',
+      ids: ['e1'],
+      patch: { route: 'orthogonal' },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('empty ids returns an empty patch', () => {
+    const patch = compileCommand(docWithEdges(), {
+      type: 'edge.update',
+      ids: [],
+      patch: { route: 'orthogonal' },
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('duplicates are ignored (first occurrence wins)', () => {
+    const patch = compileCommand(docWithEdges(), {
+      type: 'edge.update',
+      ids: ['e1', 'e1'],
+      patch: { route: 'straight' },
+    });
+    expect(Object.keys(patch.edges)).toEqual(['e1']);
+  });
+
+  it('unknown id throws', () => {
+    expect(() =>
+      compileCommand(docWithEdges(), {
+        type: 'edge.update',
+        ids: ['ghost'],
+        patch: { route: 'straight' },
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('an invalid route throws', () => {
+    expect(() =>
+      compileCommand(docWithEdges(), {
+        type: 'edge.update',
+        ids: ['e1'],
+        patch: { route: 'zigzag' as Edge['route'] },
+      }),
+    ).toThrow(CommandError);
+  });
+});
+
 describe('unknown command type throws', () => {
   it('throws CommandError', () => {
     expect(() =>

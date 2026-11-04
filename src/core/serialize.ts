@@ -14,7 +14,7 @@
  * and every repair is reported.
  */
 
-import type { Doc, Node, Edge, Group, Id, NodeKind, NodeShape, Anchor } from './types';
+import type { Doc, Node, Edge, Group, Id, NodeKind, NodeShape, EdgeRoute, Anchor } from './types';
 import { validateDoc } from './doc';
 
 /** Current file format version. Increment when making breaking changes. */
@@ -171,6 +171,15 @@ export function coerceDoc(obj: unknown): Doc {
             anchor: (to.anchor as Anchor) || 'auto',
           },
           label: typeof e.label === 'string' ? e.label : undefined,
+          // T-033: the route passes through when it is one of the three (a
+          // string of any other kind is dropped — validateDoc would only warn
+          // about it, and a migration must produce a valid document).
+          route:
+            e.route === 'auto' ||
+            e.route === 'straight' ||
+            e.route === 'orthogonal'
+              ? (e.route as EdgeRoute)
+              : undefined,
         };
       }
     }

@@ -23,6 +23,14 @@ export type NodeShape = 'rect' | 'rounded' | 'diamond' | 'stadium';
 /** Edge anchor points on a node border (or 'auto' for automatic routing). */
 export type Anchor = 'auto' | 'top' | 'right' | 'bottom' | 'left';
 
+/**
+ * The routing style of an edge (T-033, M9 — orthogonal routing). Optional:
+ * absent means `'auto'`, so every file written before routes exist stays
+ * valid without a migration (I-08, no version bump) and renders
+ * pixel-identically — 'auto' is today's straight arrow.
+ */
+export type EdgeRoute = 'auto' | 'straight' | 'orthogonal';
+
 /** A node placed on the canvas. Coordinates are world units (PLAN D-07). */
 export interface Node {
   id: Id;
@@ -54,6 +62,8 @@ export interface Edge {
   from: EdgeEndpoint;
   to: EdgeEndpoint;
   label?: string;
+  /** The routing style (T-033). Optional — absent renders as `'auto'`. */
+  route?: EdgeRoute;
 }
 
 /** A named group that nodes can belong to. */
@@ -111,6 +121,7 @@ export type Command =
   | { type: 'group.unassign'; ids: Id[] }
   | { type: 'edge.create'; edge: Edge }
   | { type: 'edge.delete'; ids: Id[] }
+  | { type: 'edge.update'; ids: Id[]; patch: EdgeContentPatch }
   /**
    * A batch of commands compiled as ONE patch (T-029, M9): each sub-command
    * is compiled against the document produced by the previous ones, and the
@@ -130,4 +141,13 @@ export interface NodeContentPatch {
   color?: string;
   tags?: string[];
   shape?: NodeShape;
+}
+
+/**
+ * The editable content fields of an edge (T-033, M9): the routing style.
+ * Endpoints are structural (`edge.create` / `edge.delete`), never patched
+ * here — the same split nodes have between content and geometry.
+ */
+export interface EdgeContentPatch {
+  route?: EdgeRoute;
 }
