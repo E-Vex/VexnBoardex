@@ -20,8 +20,8 @@
  */
 
 import type { Doc, Node, Edge, NodeShape } from '../core/types';
-import { rectContains, rectsIntersect } from '../core/geometry';
-import { edgeEndpoints, nodeRect, anchorPoint } from '../core/edgeGeometry';
+import { rectContains, rectsIntersect, type Point } from '../core/geometry';
+import { edgePoints, anchorPoint, polylineMidpoint } from '../core/edgeGeometry';
 import { groupFrameRect } from '../core/hitTest';
 import {
   type Camera,
@@ -55,6 +55,8 @@ import {
   TEXT_NODE_CORNER_RADIUS,
   EDGE_COLOR,
   EDGE_WIDTH,
+  EDGE_SELECTED_COLOR,
+  EDGE_SELECTED_WIDTH,
   ARROWHEAD_SIZE,
   ARROWHEAD_ANGLE,
   HANDLE_COLOR,
@@ -335,6 +337,7 @@ function drawArrowhead(
   tipY: number,
   angle: number,
   size: number,
+  color: string = EDGE_COLOR,
 ): void {
   const halfAngle = ARROWHEAD_ANGLE;
   const left = angle + Math.PI - halfAngle;
@@ -344,65 +347,59 @@ function drawArrowhead(
   ctx.lineTo(tipX + Math.cos(left) * size, tipY + Math.sin(left) * size);
   ctx.lineTo(tipX + Math.cos(right) * size, tipY + Math.sin(right) * size);
   ctx.closePath();
-  ctx.fillStyle = EDGE_COLOR;
+  ctx.fillStyle = color;
   ctx.fill();
 }
 
 /**
- * Draw one edge in world coordinates (T-010): a straight line from the
- * resolved `from` endpoint to the resolved `to` endpoint, with an arrowhead
- * at the `to` end. The line width and arrowhead are scaled by `1/scale`
- * so they render at constant screen size regardless of zoom.
+ * Draw one edge in world coordinates (T-010, T-033): the polyline `points`
+ * (already resolved from the CURRENT rects — straight routes have two
+ * points, orthogonal elbows three or four), stroked with an arrowhead at
+ * the `to` end pointing along the LAST segment. Line width and arrowhead
+ * are scaled by `1/scale` so they render at constant screen size.
  *
- * `drag` (UI preview) can offset nodes — edges connected to dragged nodes
- * are drawn to their preview positions so the arrow follows the drag.
+ * A SELECTED edge (T-033) paints in the accent selection colour, slightly
+ * thicker — the same accent the node selection outline uses.
+ *
+ * The optional label (T-010) sits at the polyline's arc-length midpoint,
+ * which for a two-point line is exactly the old segment midpoint.
  */
 function drawEdge(
   ctx: CanvasRenderingContext2D,
   edge: Edge,
-  doc: Doc,
+  points: Point[],
   scale: number,
-  drag: { ids: Set<string>; dx: number; dy: number } | null,
+  selected: boolean,
 ): void {
-  // Resolve the rect for each node, applying drag preview offset if needed.
-  const rectOf = (id: string) => {
-    const node = doc.nodes[id];
-    if (!node) return undefined;
-    const isDragged = drag !== null && drag.ids.has(id);
-    const dx = isDragged ? drag.dx : 0;
-    const dy = isDragged ? drag.dy : 0;
-    const r = nodeRect(node);
-    return { x: r.x + dx, y: r.y + dy, w: r.w, h: r.h };
-  };
+  if (points.length < 2) return;
 
-  const endpoints = edgeEndpoints(edge, rectOf);
-  if (!endpoints) return; // one of the nodes is missing
+  const width = (selected ? EDGE_SELECTED_WIDTH : EDGE_WIDTH) / scale;
+  const color = selected ? EDGE_SELECTED_COLOR : EDGE_COLOR;
 
-  const { from, to } = endpoints;
-
-  // Line from `from` to `to`.
+  // The polyline.
   ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(to.x, to.y);
-  ctx.lineWidth = EDGE_WIDTH / scale;
-  ctx.strokeStyle = EDGE_COLOR;
+  ctx.moveTo(points[0]!.x, points[0]!.y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i]!.x, points[i]!.y);
+  }
+  ctx.lineWidth = width;
+  ctx.strokeStyle = color;
   ctx.stroke();
 
-  // Arrowhead at the `to` endpoint, pointing along the line direction.
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const angle = Math.atan2(dy, dx);
-  drawArrowhead(ctx, to.x, to.y, angle, ARROWHEAD_SIZE / scale);
+  // Arrowhead at the `to` endpoint, pointing along the last segment.
+  const last = points[points.length - 1]!;
+  const prev = points[points.length - 2]!;
+  const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+  drawArrowhead(ctx, last.x, last.y, angle, ARROWHEAD_SIZE / scale, color);
 
-  // Optional: edge label (T-010 - basic label at midpoint).
+  // Optional: edge label (T-010), at the arc-length midpoint (T-033).
   if (edge.label && edge.label.length > 0) {
-    const midX = (from.x + to.x) / 2;
-    const midY = (from.y + to.y) / 2;
+    const mid = polylineMidpoint(points);
     ctx.font = `${FONT_SIZE}px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = EDGE_COLOR;
-    ctx.fillText(edge.label, midX, midY);
+    ctx.fillStyle = color;
+    ctx.fillText(edge.label, mid.x, mid.y);
   }
 }
 
@@ -577,6 +574,7 @@ export function renderBoard(
     tagFilter: [],
     boxSelect: null,
     mode: 'select',
+    edgeSelection: [],
   },
 ): void {
   const { width, height } = viewport;
@@ -656,7 +654,9 @@ export function renderBoard(
 
   // 3b. Edges — between the grid/frames and the nodes (T-010). Drawn in world
   // coordinates through the camera transform, beneath all nodes (D-21).
-  // Culling: skip edges whose both endpoints are outside the visible rect.
+  // T-033: the ROUTE decides the polyline — a straight edge is two points,
+  // an orthogonal edge is an elbow — resolved once against the SAME rectOf
+  // the culling uses (drag AND resize previews), then handed to drawEdge.
   const dragPreview = ui.drag
     ? { ids: new Set(ui.drag.ids), dx: ui.drag.dx, dy: ui.drag.dy }
     : null;
@@ -674,35 +674,32 @@ export function renderBoard(
     const dy = isDragged ? dragPreview.dy : 0;
     return { x: node.x + dx, y: node.y + dy, w: node.w, h: node.h };
   };
+  const selectedEdges = new Set(ui.edgeSelection);
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const edge of Object.values(doc.edges)) {
-    // Quick culling: if both endpoints are outside visible, skip.
-    // We use a loose check by computing the edge's bbox from its endpoints.
-    const endpoints = edgeEndpoints(edge, rectOf);
-    if (!endpoints) continue;
-    // Rough bbox culling: if both endpoints are outside visible, skip.
-    const fromIn = rectContains(visible, endpoints.from);
-    const toIn = rectContains(visible, endpoints.to);
-    if (!fromIn && !toIn) {
-      // Further check: if the line segment might cross the visible rect,
-      // we should draw it. For simplicity, we draw if either endpoint is in
-      // or if the line intersects the visible rect's expanded bounds.
-      // A simple segment-rect intersection test:
-      const segMinX = Math.min(endpoints.from.x, endpoints.to.x);
-      const segMaxX = Math.max(endpoints.from.x, endpoints.to.x);
-      const segMinY = Math.min(endpoints.from.y, endpoints.to.y);
-      const segMaxY = Math.max(endpoints.from.y, endpoints.to.y);
-      if (
-        segMaxX < visible.x ||
-        segMinX > visible.x + visible.w ||
-        segMaxY < visible.y ||
-        segMinY > visible.y + visible.h
-      ) {
-        continue; // segment bbox doesn't intersect visible rect
-      }
+    const points = edgePoints(edge, rectOf);
+    if (points === null) continue; // one of the nodes is missing
+    // Culling: the polyline's bounding box must intersect the visible rect.
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
     }
-    drawEdge(ctx, edge, doc, m.scale, dragPreview);
+    if (
+      !rectsIntersect(
+        { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+        visible,
+      )
+    ) {
+      continue;
+    }
+    drawEdge(ctx, edge, points, m.scale, selectedEdges.has(edge.id));
   }
   ctx.restore();
 

@@ -107,6 +107,12 @@ export const EDGE_COLOR = '#8a8a9a';
 /** Edge stroke width in world units (1 unit = 1 CSS px at zoom 1). */
 export const EDGE_WIDTH = 2;
 
+/** Selected-edge stroke colour (T-033): the accent selection colour. */
+export const EDGE_SELECTED_COLOR = '#f5a623';
+
+/** Selected-edge stroke width in world units (T-033): a touch thicker. */
+export const EDGE_SELECTED_WIDTH = 3;
+
 /** Arrowhead size in world units (length and half-width). */
 export const ARROWHEAD_SIZE = 10;
 

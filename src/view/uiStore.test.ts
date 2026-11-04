@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Doc, Node } from '../core/types';
-import { createUiStore, pruneSelection } from './uiStore';
+import { createUiStore, pruneEdgeSelection, pruneSelection } from './uiStore';
 
 function node(id: string): Node {
   return {
@@ -29,7 +29,7 @@ function docOf(...ids: string[]): Doc {
 describe('createUiStore — initial state (R3)', () => {
   it('starts with an empty selection, no drag and select mode', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select' });
+    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select', edgeSelection: [] });
   });
 });
 
@@ -43,6 +43,7 @@ describe('setSelection — notify only on real change (R3)', () => {
     expect(fn).toHaveBeenCalledTimes(1);
     expect(fn).toHaveBeenCalledWith({
       selection: ['a'],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -87,6 +88,7 @@ describe('setSelection — notify only on real change (R3)', () => {
     store.setSelection(['a', 'b']);
     expect(store.get()).toEqual({
       selection: ['a', 'b'],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 10, dy: 20 },
       connect: null,
       editing: null,
@@ -152,7 +154,7 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select' });
+    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select', edgeSelection: [] });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
@@ -297,5 +299,66 @@ describe('setMode — the interaction mode (T-029)', () => {
     store.setMode('select');
     expect(fn).toHaveBeenCalledTimes(1);
     expect(store.get().mode).toBe('select');
+  });
+});
+
+// --- T-033: edge selection ---
+
+describe('setEdgeSelection — notify only on real change (T-033)', () => {
+  it('stores the edge selection and notifies once', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setEdgeSelection(['e1']);
+    expect(store.get().edgeSelection).toEqual(['e1']);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('the same ids are not a change', () => {
+    const store = createUiStore();
+    store.setEdgeSelection(['e1']);
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setEdgeSelection(['e1']);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('an edge selection never disturbs the node selection', () => {
+    const store = createUiStore();
+    store.setSelection(['a']);
+    store.setEdgeSelection(['e1']);
+    expect(store.get().selection).toEqual(['a']);
+    expect(store.get().edgeSelection).toEqual(['e1']);
+  });
+
+  it('clearing to [] from [] does not notify', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setEdgeSelection([]);
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('pruneEdgeSelection — drop deleted edges (T-033)', () => {
+  function docWithEdges(): Doc {
+    const doc = docOf('a', 'b', 'c');
+    doc.edges = {
+      e1: { id: 'e1', from: { node: 'a', anchor: 'auto' }, to: { node: 'b', anchor: 'auto' } },
+      e2: { id: 'e2', from: { node: 'b', anchor: 'auto' }, to: { node: 'c', anchor: 'auto' } },
+    };
+    return doc;
+  }
+
+  it('keeps ids that still exist (and returns the SAME array)', () => {
+    const doc = docWithEdges();
+    const sel = ['e1', 'e2'];
+    expect(pruneEdgeSelection(sel, doc)).toBe(sel);
+  });
+
+  it('drops ids of deleted edges, preserving order', () => {
+    const doc = docWithEdges();
+    delete doc.edges.e1;
+    expect(pruneEdgeSelection(['e1', 'e2'], doc)).toEqual(['e2']);
   });
 });

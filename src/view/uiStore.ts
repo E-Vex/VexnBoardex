@@ -63,9 +63,16 @@ export interface ResizePreview {
  */
 export type Mode = 'select' | 'mindmap';
 
-/** The UI state layer (D-25): selection ids, the active previews, the node
+/**
+ * The UI state layer (D-25): selection ids, the active previews, the node
  * being text-edited, the active tag filter, the box-select rect and the
- * interaction mode. */
+ * interaction mode.
+ *
+ * T-033: `edgeSelection` holds selected EDGE ids — kept separate from the
+ * node `selection` so node logic (drag, delete, inspector node sections)
+ * never trips over an edge id, and vice versa. The two selections are
+ * mutually exclusive at the set sites (the input layer clears the other one).
+ */
 export interface UiState {
   selection: Id[];
   drag: DragPreview | null;
@@ -80,6 +87,8 @@ export interface UiState {
   boxSelect: BoxSelectRect | null;
   /** The interaction mode (T-029): 'select' (free-form) or 'mindmap'. */
   mode: Mode;
+  /** The selected edge ids (T-033). UI-only — never saved (I-05). */
+  edgeSelection: Id[];
 }
 
 export interface UiStore {
@@ -87,6 +96,8 @@ export interface UiStore {
   get(): UiState;
   /** Replace the selection. No notification when the ids are unchanged. */
   setSelection(ids: Id[]): void;
+  /** Replace the selected edges (T-033). No notification when unchanged. */
+  setEdgeSelection(ids: Id[]): void;
   /** Replace the drag preview (null = no drag). No notification when equal. */
   setDrag(drag: DragPreview | null): void;
   /** Replace the connect preview (null = no gesture). No notification when equal. */
@@ -154,7 +165,8 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameResize(a.resize, b.resize) &&
     sameIds(a.tagFilter, b.tagFilter) &&
     sameBoxSelect(a.boxSelect, b.boxSelect) &&
-    a.mode === b.mode
+    a.mode === b.mode &&
+    sameIds(a.edgeSelection, b.edgeSelection)
   );
 }
 
@@ -168,7 +180,7 @@ function sameResize(a: ResizePreview | null, b: ResizePreview | null): boolean {
 /**
  * Create a UI store initialised to all-empty UI state
  * `{ selection: [], drag: null, connect: null, editing: null, resize: null,
- *    boxSelect: null, mode: 'select' }`.
+ *    boxSelect: null, mode: 'select', edgeSelection: [] }`.
  */
 export function createUiStore(): UiStore {
   let current: UiState = {
@@ -180,6 +192,7 @@ export function createUiStore(): UiStore {
     tagFilter: [],
     boxSelect: null,
     mode: 'select',
+    edgeSelection: [],
   };
   const subscribers = new Set<(state: UiState) => void>();
 
@@ -199,6 +212,9 @@ export function createUiStore(): UiStore {
     },
     setSelection(ids: Id[]) {
       patch({ selection: ids });
+    },
+    setEdgeSelection(ids: Id[]) {
+      patch({ edgeSelection: ids });
     },
     setDrag(drag: DragPreview | null) {
       patch({ drag });
@@ -240,4 +256,17 @@ export function pruneSelection(selection: Id[], doc: Doc): Id[] {
     Object.prototype.hasOwnProperty.call(doc.nodes, id),
   );
   return kept.length === selection.length ? selection : kept;
+}
+
+/**
+ * Prune an edge selection down to the ids that still exist in `doc` (T-033,
+ * same rule as `pruneSelection`): deleting a node cascades its edges away
+ * (I-09), so the edge selection must never keep a stale id. Order is
+ * preserved. Pure: returns the input array itself when nothing is pruned.
+ */
+export function pruneEdgeSelection(edgeSelection: Id[], doc: Doc): Id[] {
+  const kept = edgeSelection.filter((id) =>
+    Object.prototype.hasOwnProperty.call(doc.edges, id),
+  );
+  return kept.length === edgeSelection.length ? edgeSelection : kept;
 }
