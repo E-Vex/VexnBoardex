@@ -3,35 +3,21 @@
  *
  * Debounced persistence of the document envelope (doc + view) to IndexedDB.
  * Pure core logic is in core/serialize.ts; this is the browser-only storage layer.
+ * The connection lives in ./idb (T-034: the DB gained a `templates` store at
+ * version 2; both stores share ONE version so they can never race).
  */
 
 import type { Doc } from '../core/types';
 import { serializeDoc, deserializeDoc, type FileEnvelope } from '../core/serialize';
+import { openBoardDb } from './idb';
 
-const DB_NAME = 'vexboard';
 const STORE_NAME = 'autosave';
-const DB_VERSION = 1;
 const AUTOSAVE_KEY = 'current';
 const DEBOUNCE_MS = 1000;
 
-/** Open (or create) the IndexedDB database. */
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
 /** Save the envelope to IndexedDB. */
 export async function saveAutosave(envelope: FileEnvelope): Promise<void> {
-  const db = await openDB();
+  const db = await openBoardDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).put(envelope, AUTOSAVE_KEY);
@@ -42,7 +28,7 @@ export async function saveAutosave(envelope: FileEnvelope): Promise<void> {
 
 /** Load the envelope from IndexedDB. */
 export async function loadAutosave(): Promise<{ envelope: FileEnvelope; warnings: string[] } | null> {
-  const db = await openDB();
+  const db = await openBoardDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const request = tx.objectStore(STORE_NAME).get(AUTOSAVE_KEY);
@@ -62,7 +48,7 @@ export async function loadAutosave(): Promise<{ envelope: FileEnvelope; warnings
 
 /** Clear the autosave (e.g., on explicit "new board" or user request). */
 export async function clearAutosave(): Promise<void> {
-  const db = await openDB();
+  const db = await openBoardDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).delete(AUTOSAVE_KEY);
