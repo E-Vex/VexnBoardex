@@ -19,6 +19,8 @@ export {
   hitTestWithHandles,
   HANDLE_ANCHORS,
   HANDLE_HIT_RADIUS,
+  edgeAt,
+  EDGE_HIT_RADIUS,
   type HitResult,
 } from './hitTest';
 export {

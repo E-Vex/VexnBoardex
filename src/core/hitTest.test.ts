@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Doc, Node } from './types';
-import { hitTest, hitTestWithHandles, hitTestResizeHandles } from './hitTest';
+import { edgeAt, hitTest, hitTestWithHandles, hitTestResizeHandles } from './hitTest';
 import type { Point } from './geometry';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
@@ -197,5 +197,89 @@ describe('hitTestResizeHandles — corner hit-testing (T-021)', () => {
   it('a point inside the body but away from corners is not a resize hit', () => {
     const d = doc1();
     expect(hitTestResizeHandles(d, { x: 100, y: 40 }, cam, ['a'])).toBeNull();
+  });
+});
+
+// --- T-033: route-aware edge hit-testing ---
+
+describe('edgeAt — click an edge along its drawn route (T-033)', () => {
+  /** a (0,0,100,50) — b (200,0,100,50): a straight edge runs (100,25)→(200,25). */
+  function docWithStraightEdge(): Doc {
+    const doc = docOf(node('a'), node('b', { x: 200, y: 0 }));
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+    };
+    return doc;
+  }
+
+  it('a point on the straight route hits the edge', () => {
+    expect(edgeAt(docWithStraightEdge(), { x: 150, y: 25 }, 1)).toBe('e1');
+  });
+
+  it('a point 5 world units off the line hits at zoom 1 (6 screen px)', () => {
+    expect(edgeAt(docWithStraightEdge(), { x: 150, y: 30 }, 1)).toBe('e1');
+  });
+
+  it('a point 10 world units off the line misses at zoom 1', () => {
+    expect(edgeAt(docWithStraightEdge(), { x: 150, y: 35 }, 1)).toBeNull();
+  });
+
+  it('the threshold is in SCREEN pixels: zoom 0.5 makes 10 world units a hit', () => {
+    // 10 world units at zoom 0.5 = 5 screen px, within EDGE_HIT_RADIUS.
+    expect(edgeAt(docWithStraightEdge(), { x: 150, y: 35 }, 0.5)).toBe('e1');
+    // 20 world units at zoom 2 = 40 screen px — far out.
+    expect(edgeAt(docWithStraightEdge(), { x: 150, y: 45 }, 2)).toBeNull();
+  });
+
+  it('an orthogonal edge is hit along its whole elbow, off the straight line', () => {
+    // a (0,0,100,50), b (200,100,100,50): auto/auto orthogonal gives the
+    // Z (100,25) → (150,25) → (150,125) → (200,125). The probe (150,95) is
+    // ON the vertical middle segment but ~18 world units from the straight
+    // line — unreachable before T-033.
+    const doc = docOf(node('a'), node('b', { x: 200, y: 100 }));
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+      route: 'orthogonal',
+    };
+    expect(edgeAt(doc, { x: 150, y: 95 }, 1)).toBe('e1');
+  });
+
+  it('the NEAREST edge wins when several are within the threshold', () => {
+    // e1 a→b along y = 25; e2 a→c runs (75,50)→(225,200). The probe sits
+    // exactly on e2 and 100 away from e1.
+    const doc = docOf(
+      node('a'),
+      node('b', { x: 200, y: 0 }),
+      node('c', { x: 200, y: 200 }),
+    );
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+    };
+    doc.edges['e2'] = {
+      id: 'e2',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'c', anchor: 'auto' },
+    };
+    expect(edgeAt(doc, { x: 150, y: 125 }, 1)).toBe('e2');
+  });
+
+  it('a dangling edge (missing node) is skipped, not a hit', () => {
+    const doc = docOf(node('a'), node('b', { x: 200, y: 0 }));
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'ghost', anchor: 'auto' },
+    };
+    expect(edgeAt(doc, { x: 150, y: 25 }, 1)).toBeNull();
+  });
+
+  it('a doc with no edges never hits', () => {
+    expect(edgeAt(docOf(node('a')), { x: 50, y: 25 }, 1)).toBeNull();
   });
 });
