@@ -135,3 +135,17 @@ export const HANDLE_BORDER_WIDTH = 2;
 
 /** Handle offset from node edge in CSS px on screen (drawn outside the node). */
 export const HANDLE_OFFSET = 8;
+
+// ── Kanban columns (T-035) ──────────────────────────────────────────────────
+
+/** Column panel fill — a translucent slate wash over the dark board. */
+export const KANBAN_COLUMN_FILL = 'rgba(122, 132, 168, 0.10)';
+
+/** Column panel border (solid, unlike the dashed plain frames). */
+export const KANBAN_COLUMN_BORDER = 'rgba(150, 160, 190, 0.35)';
+
+/** Column header ink — the column name. */
+export const KANBAN_HEADER_COLOR = '#c9cede';
+
+/** The × close affordance ink. */
+export const KANBAN_CLOSE_COLOR = 'rgba(201, 206, 222, 0.75)';
