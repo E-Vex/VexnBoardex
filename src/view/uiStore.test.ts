@@ -29,7 +29,21 @@ function docOf(...ids: string[]): Doc {
 describe('createUiStore — initial state (R3)', () => {
   it('starts with an empty selection, no drag and select mode', () => {
     const store = createUiStore();
-    expect(store.get()).toEqual({ selection: [], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select', edgeSelection: [] });
+    expect(store.get()).toEqual({
+      selection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
+    });
   });
 });
 
@@ -44,6 +58,10 @@ describe('setSelection — notify only on real change (R3)', () => {
     expect(fn).toHaveBeenCalledWith({
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -89,6 +107,10 @@ describe('setSelection — notify only on real change (R3)', () => {
     expect(store.get()).toEqual({
       selection: ['a', 'b'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: { ids: ['a'], dx: 10, dy: 20 },
       connect: null,
       editing: null,
@@ -154,7 +176,21 @@ describe('setDrag — notify only on real change (R3)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setDrag(null);
-    expect(store.get()).toEqual({ selection: ['a'], drag: null, connect: null, editing: null, resize: null, tagFilter: [], boxSelect: null, mode: 'select', edgeSelection: [] });
+    expect(store.get()).toEqual({
+      selection: ['a'],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
+    });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
@@ -344,8 +380,16 @@ describe('pruneEdgeSelection — drop deleted edges (T-033)', () => {
   function docWithEdges(): Doc {
     const doc = docOf('a', 'b', 'c');
     doc.edges = {
-      e1: { id: 'e1', from: { node: 'a', anchor: 'auto' }, to: { node: 'b', anchor: 'auto' } },
-      e2: { id: 'e2', from: { node: 'b', anchor: 'auto' }, to: { node: 'c', anchor: 'auto' } },
+      e1: {
+        id: 'e1',
+        from: { node: 'a', anchor: 'auto' },
+        to: { node: 'b', anchor: 'auto' },
+      },
+      e2: {
+        id: 'e2',
+        from: { node: 'b', anchor: 'auto' },
+        to: { node: 'c', anchor: 'auto' },
+      },
     };
     return doc;
   }
@@ -360,5 +404,53 @@ describe('pruneEdgeSelection — drop deleted edges (T-033)', () => {
     const doc = docWithEdges();
     delete doc.edges.e1;
     expect(pruneEdgeSelection(['e1', 'e2'], doc)).toEqual(['e2']);
+  });
+});
+
+describe('column previews and kanban UI state (T-037)', () => {
+  it('setColumnDrag / setColumnResize store previews and notify once', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnDrag({ id: 'c1', dx: 10, dy: 20 });
+    expect(store.get().columnDrag).toEqual({ id: 'c1', dx: 10, dy: 20 });
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setColumnResize({ id: 'c1', x: 0, y: 0, w: 320, h: 500 });
+    expect(store.get().columnResize).toEqual({
+      id: 'c1',
+      x: 0,
+      y: 0,
+      w: 320,
+      h: 500,
+    });
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('equal previews are not a change; null clears', () => {
+    const store = createUiStore();
+    store.setColumnDrag({ id: 'c1', dx: 1, dy: 2 });
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnDrag({ id: 'c1', dx: 1, dy: 2 });
+    expect(fn).not.toHaveBeenCalled();
+    store.setColumnDrag(null);
+    expect(store.get().columnDrag).toBeNull();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('setKanbanDropTarget / setEditingColumn store ids and notify on change only', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setKanbanDropTarget('c2');
+    expect(store.get().kanbanDropTarget).toBe('c2');
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setKanbanDropTarget('c2');
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setEditingColumn('c1');
+    expect(store.get().editingColumn).toBe('c1');
+    store.setEditingColumn(null);
+    expect(store.get().editingColumn).toBeNull();
+    expect(fn).toHaveBeenCalledTimes(3);
   });
 });

@@ -6,6 +6,9 @@ import { cameraCenteredOn, visibleWorldRect, type Camera } from './camera';
 import { dotCount, dotIndexRange, gridStep } from './grid';
 import { renderBoard } from './renderer';
 import {
+  KANBAN_COLUMN_FILL,
+  KANBAN_HIGHLIGHT_FILL,
+  KANBAN_HIGHLIGHT_BORDER,
   NODE_BORDER_COLOR,
   ORIGIN_MARKER_COLOR,
   SELECTION_COLOR,
@@ -323,6 +326,10 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -370,6 +377,10 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: [],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -395,6 +406,10 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -424,6 +439,10 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       renderBoard(ctx, { width: 1280, height: 720 }, zc, docOf(node), {
         selection: ['a'],
         edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
         drag: null,
         connect: null,
         editing: null,
@@ -451,6 +470,10 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(off, on), {
       selection: ['off', 'on'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -480,6 +503,10 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -511,6 +538,10 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: [],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -533,6 +564,10 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -558,6 +593,10 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: ['a'],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
       connect: null,
       editing: null,
@@ -607,7 +646,12 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60, w: 200, h: 120 });
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge));
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+    );
 
     // Line: moveTo + lineTo + stroke (in addition to origin marker)
     expect(countCalls(ctx, 'moveTo')).toBeGreaterThanOrEqual(2); // origin + edge
@@ -625,17 +669,27 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60 });
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
-      selection: [],
-      edgeSelection: [],
-      drag: null,
-      connect: null,
-      editing: null,
-      resize: null,
-      tagFilter: [],
-      boxSelect: null,
-      mode: 'select',
-    });
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+      {
+        selection: [],
+        edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
+        drag: null,
+        connect: null,
+        editing: null,
+        resize: null,
+        tagFilter: [],
+        boxSelect: null,
+        mode: 'select',
+      },
+    );
 
     // Grid rects (dots) happen first, then edge lineTo, then node arcTo.
     const firstRectIdx = firstIndex(ctx, 'rect');
@@ -653,17 +707,27 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
     // Drag node 'a' by (50, 25)
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
-      selection: ['a'],
-      edgeSelection: [],
-      drag: { ids: ['a'], dx: 50, dy: 25 },
-      connect: null,
-      editing: null,
-      resize: null,
-      tagFilter: [],
-      boxSelect: null,
-      mode: 'select',
-    });
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+      {
+        selection: ['a'],
+        edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
+        drag: { ids: ['a'], dx: 50, dy: 25 },
+        connect: null,
+        editing: null,
+        resize: null,
+        tagFilter: [],
+        boxSelect: null,
+        mode: 'select',
+      },
+    );
 
     // The edge's 'from' endpoint should be at a's dragged position.
     // We can't easily test the exact coordinates from the stub, but we can
@@ -677,17 +741,27 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60, w: 200, h: 120 });
     const edge = makeEdge('e1', 'a', 'b', 'auto', 'auto', 'link');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
-      selection: [],
-      edgeSelection: [],
-      drag: null,
-      connect: null,
-      editing: null,
-      resize: null,
-      tagFilter: [],
-      boxSelect: null,
-      mode: 'select',
-    });
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+      {
+        selection: [],
+        edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
+        drag: null,
+        connect: null,
+        editing: null,
+        resize: null,
+        tagFilter: [],
+        boxSelect: null,
+        mode: 'select',
+      },
+    );
 
     // Label should be drawn with fillText at the midpoint of the edge.
     // With auto anchors: from is at right edge of a (center y=0), to is at left edge of b (center y=0).
@@ -704,17 +778,27 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 300, y: -60 });
     const edge = makeEdge('e1', 'a', 'b'); // no label
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
-      selection: [],
-      edgeSelection: [],
-      drag: null,
-      connect: null,
-      editing: null,
-      resize: null,
-      tagFilter: [],
-      boxSelect: null,
-      mode: 'select',
-    });
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+      {
+        selection: [],
+        edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
+        drag: null,
+        connect: null,
+        editing: null,
+        resize: null,
+        tagFilter: [],
+        boxSelect: null,
+        mode: 'select',
+      },
+    );
 
     const fillTextCalls = ctx.calls.filter((c) => c.name === 'fillText');
     // Only node texts should appear
@@ -727,17 +811,27 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const b = makeNode('b', { x: 6000, y: 5000 });
     const edge = makeEdge('e1', 'a', 'b');
     const ctx = createStubCtx();
-    renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
-      selection: [],
-      edgeSelection: [],
-      drag: null,
-      connect: null,
-      editing: null,
-      resize: null,
-      tagFilter: [],
-      boxSelect: null,
-      mode: 'select',
-    });
+    renderBoard(
+      ctx,
+      { width: 1280, height: 720 },
+      cam,
+      docWithEdge(a, b, edge),
+      {
+        selection: [],
+        edgeSelection: [],
+        columnDrag: null,
+        columnResize: null,
+        kanbanDropTarget: null,
+        editingColumn: null,
+        drag: null,
+        connect: null,
+        editing: null,
+        resize: null,
+        tagFilter: [],
+        boxSelect: null,
+        mode: 'select',
+      },
+    );
 
     // No edge drawing calls (beyond origin/grid which don't use lineTo for edges)
     // We expect at least origin marker (moveTo/lineTo) but no additional edge line
@@ -770,6 +864,10 @@ describe('renderBoard — group frames (T-024)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithFrameAndEdge(), {
       selection: [],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -790,8 +888,7 @@ describe('renderBoard — group frames (T-024)', () => {
     // the auto-anchored edge runs from a's right side (-100, -100) to b's
     // left side (300, -100).
     const edgeLineIdx = ctx.calls.findIndex(
-      (c) =>
-        c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === -100,
+      (c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === -100,
     );
     expect(firstArcToIdx).toBeGreaterThanOrEqual(0);
     expect(edgeLineIdx).toBeGreaterThanOrEqual(0);
@@ -812,6 +909,10 @@ describe('renderBoard — group frames (T-024)', () => {
     renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, {
       selection: [],
       edgeSelection: [],
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
       drag: null,
       connect: null,
       editing: null,
@@ -850,6 +951,10 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
   const ui = {
     selection: [],
     edgeSelection: [],
+    columnDrag: null,
+    columnResize: null,
+    kanbanDropTarget: null,
+    editingColumn: null,
     drag: null,
     connect: null,
     editing: null,
@@ -866,16 +971,24 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
 
     // The Z-route: (-100, 0) → (100, 0) → (100, 160) → (300, 160).
     expect(
-      ctx.calls.find((c) => c.name === 'moveTo' && c.args[0] === -100 && c.args[1] === 0),
+      ctx.calls.find(
+        (c) => c.name === 'moveTo' && c.args[0] === -100 && c.args[1] === 0,
+      ),
     ).toBeDefined();
     expect(
-      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 0),
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 0,
+      ),
     ).toBeDefined();
     expect(
-      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 160),
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 160,
+      ),
     ).toBeDefined();
     expect(
-      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160),
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160,
+      ),
     ).toBeDefined();
     // The arrowhead points along the LAST segment (horizontal): its side
     // points sit at x = 300 − ARROWHEAD_SIZE·cos(30°) ≈ 291.34, y = 160 ± 5.
@@ -899,15 +1012,17 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
     // One strokeStyle/lineWidth pair for the edge polyline uses the accent
     // (EDGE_SELECTED_COLOR '#f5a623') and width 3 — thicker than normal.
     expect(
-      ctx.calls.some((c) => c.name === 'strokeStyle' && c.args[0] === '#f5a623'),
+      ctx.calls.some(
+        (c) => c.name === 'strokeStyle' && c.args[0] === '#f5a623',
+      ),
     ).toBe(true);
-    expect(ctx.calls.some((c) => c.name === 'lineWidth' && c.args[0] === 3)).toBe(
-      true,
-    );
+    expect(
+      ctx.calls.some((c) => c.name === 'lineWidth' && c.args[0] === 3),
+    ).toBe(true);
     // The arrowhead fill is accent too.
-    expect(ctx.calls.some((c) => c.name === 'fillStyle' && c.args[0] === '#f5a623')).toBe(
-      true,
-    );
+    expect(
+      ctx.calls.some((c) => c.name === 'fillStyle' && c.args[0] === '#f5a623'),
+    ).toBe(true);
   });
 
   it('an unselected edge keeps the classic EDGE_COLOR', () => {
@@ -915,7 +1030,9 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, ui);
     expect(
-      ctx.calls.some((c) => c.name === 'strokeStyle' && c.args[0] === '#8a8a9a'),
+      ctx.calls.some(
+        (c) => c.name === 'strokeStyle' && c.args[0] === '#8a8a9a',
+      ),
     ).toBe(true);
   });
 
@@ -947,10 +1064,14 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
     });
     // The last leg of the elbow now lands at y = 130, not 160.
     expect(
-      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 130),
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 130,
+      ),
     ).toBeDefined();
     expect(
-      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160),
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160,
+      ),
     ).toBeUndefined();
   });
 
@@ -975,5 +1096,208 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
     expect(
       ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100),
     ).toBeUndefined();
+  });
+});
+
+describe('renderBoard — kanban columns, T-037 follow-ups', () => {
+  const VP = { width: 1280, height: 720 };
+
+  function columnDoc(cards: Array<{ id: string; y: number; w?: number }>): Doc {
+    const doc = emptyDoc();
+    doc.groups = {
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+    };
+    for (const c of cards) {
+      doc.nodes[c.id] = makeNode(c.id, {
+        x: 16,
+        y: c.y,
+        w: c.w ?? 200,
+        h: 120,
+        groupId: 'c1',
+      });
+      doc.order.push(c.id);
+    }
+    return doc;
+  }
+
+  /** True when any recorded arcTo call has args[i] === value. */
+  function hasArcWith(
+    ctx: { calls: RecordedCall[] },
+    index: number,
+    value: number,
+  ): boolean {
+    return ctx.calls.some((c) => c.name === 'arcTo' && c.args[index] === value);
+  }
+
+  /** True when a `rect` call paints exactly these args (handle squares). */
+  function hasRect(ctx: { calls: RecordedCall[] }, args: number[]): boolean {
+    return ctx.calls.some(
+      (c) =>
+        c.name === 'rect' &&
+        (c.args as number[]).every((a, i) => a === args[i]),
+    );
+  }
+
+  it('paints the column at its EFFECTIVE height — the stored one when it fits', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([{ id: 'a', y: 52 }]); // content 188 < 400
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc);
+    // The panel's right-edge arcTo ends at stored h 400.
+    expect(hasArcWith(ctx, 3, 400)).toBe(true);
+  });
+
+  it('paints the column GROWN for three stacked cards (auto-grow)', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([
+      { id: 'a', y: 52 },
+      { id: 'b', y: 184 },
+      { id: 'c', y: 316 },
+    ]); // content 452 > 400
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc);
+    expect(hasArcWith(ctx, 3, 452)).toBe(true);
+    expect(hasArcWith(ctx, 3, 424)).toBe(false); // no card reaches there
+  });
+
+  it('paints the drop-target highlight wash and border (T-037)', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([]);
+    const plain = createStubCtx();
+    renderBoard(plain, VP, cam, doc);
+    expect(
+      plain.calls.some(
+        (c) => c.name === 'fillStyle' && c.args[0] === KANBAN_COLUMN_FILL,
+      ),
+    ).toBe(true);
+
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc, {
+      selection: [],
+      edgeSelection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: 'c1',
+      editingColumn: null,
+    });
+    expect(
+      ctx.calls.some(
+        (c) => c.name === 'fillStyle' && c.args[0] === KANBAN_HIGHLIGHT_FILL,
+      ),
+    ).toBe(true);
+    expect(
+      ctx.calls.some(
+        (c) =>
+          c.name === 'strokeStyle' && c.args[0] === KANBAN_HIGHLIGHT_BORDER,
+      ),
+    ).toBe(true);
+  });
+
+  it('offsets the panel AND its member cards during a column drag preview', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([{ id: 'a', y: 52 }]);
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc, {
+      selection: [],
+      edgeSelection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      columnDrag: { id: 'c1', dx: 100, dy: 50 },
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: null,
+    });
+    // Panel: the right edge x moves to 240 + 100 and the top to 50.
+    expect(hasArcWith(ctx, 0, 340)).toBe(true);
+    // Card: top y 52 + 50 = 102; its right edge x 16 + 100 + 200 = 316.
+    expect(hasArcWith(ctx, 1, 102)).toBe(true);
+    expect(hasArcWith(ctx, 0, 316)).toBe(true);
+  });
+
+  it('stretches member cards and repaints the panel during a column resize preview', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([{ id: 'a', y: 52 }]);
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc, {
+      selection: [],
+      edgeSelection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      columnDrag: null,
+      columnResize: { id: 'c1', x: 0, y: 0, w: 320, h: 500 },
+      kanbanDropTarget: null,
+      editingColumn: null,
+    });
+    // Panel right edge: 320, bottom: 500 (content 188 < 500, stored stands).
+    expect(hasArcWith(ctx, 0, 320)).toBe(true);
+    expect(hasArcWith(ctx, 3, 500)).toBe(true);
+    // Card stretched to the inner width: 16 + 288 = 304.
+    expect(hasArcWith(ctx, 0, 304)).toBe(true);
+  });
+
+  it('always paints the three column resize affordances (screen-constant)', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([]); // empty column, stored 240×400
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc);
+    // 8×8 squares (at scale 1) centred on the right-mid, bottom-mid and corner.
+    expect(hasRect(ctx, [236, 196, 8, 8])).toBe(true);
+    expect(hasRect(ctx, [116, 396, 8, 8])).toBe(true);
+    expect(hasRect(ctx, [236, 396, 8, 8])).toBe(true);
+  });
+
+  it('skips the column name while the DOM overlay edits it', () => {
+    const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+    const doc = columnDoc([]);
+    const plain = createStubCtx();
+    renderBoard(plain, VP, cam, doc);
+    expect(
+      plain.calls.some((c) => c.name === 'fillText' && c.args[0] === 'To Do'),
+    ).toBe(true);
+
+    const ctx = createStubCtx();
+    renderBoard(ctx, VP, cam, doc, {
+      selection: [],
+      edgeSelection: [],
+      drag: null,
+      connect: null,
+      editing: null,
+      resize: null,
+      tagFilter: [],
+      boxSelect: null,
+      mode: 'select',
+      columnDrag: null,
+      columnResize: null,
+      kanbanDropTarget: null,
+      editingColumn: 'c1',
+    });
+    expect(
+      ctx.calls.some((c) => c.name === 'fillText' && c.args[0] === 'To Do'),
+    ).toBe(false);
   });
 });

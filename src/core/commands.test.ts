@@ -1561,6 +1561,133 @@ describe('group.create — kanban columns (T-035, M9)', () => {
   });
 });
 
+describe('group.update — column rename/move/resize (T-037, M9)', () => {
+  function board(): Doc {
+    const doc = docWith(node('a'));
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: 0, w: 240, h: 400 },
+      g1: { id: 'g1', name: 'frame' },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    return doc;
+  }
+
+  it('renames a column: one group change, nodes untouched', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1'],
+      patch: { name: 'Backlog' },
+    });
+    expect(patch.groups.c1).toEqual({
+      before: doc.groups.c1,
+      after: { ...doc.groups.c1!, name: 'Backlog' },
+    });
+    expect(patch.nodes).toEqual({});
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1!.name).toBe('Backlog');
+    expect(next.nodes.a!.groupId).toBe('c1'); // membership untouched
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('moves and resizes the stored column geometry', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1'],
+      patch: { x: 100, y: 50, w: 320, h: 512 },
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).toMatchObject({ x: 100, y: 50, w: 320, h: 512 });
+    expect(next.groups.c1!.name).toBe('To Do'); // absent fields keep values
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('patches several groups in one command (one undo step)', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1', 'c2'],
+      patch: { name: 'Renamed' },
+    });
+    expect(Object.keys(patch.groups).sort()).toEqual(['c1', 'c2']);
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1!.name).toBe('Renamed');
+    expect(next.groups.c2!.name).toBe('Renamed');
+  });
+
+  it('renames a plain frame (no geometry) the same way', () => {
+    const doc = board();
+    const next = applyPatch(doc, compileCommand(doc, {
+      type: 'group.update',
+      ids: ['g1'],
+      patch: { name: 'sprint' },
+    }));
+    expect(next.groups.g1).toEqual({ id: 'g1', name: 'sprint' });
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('a no-op patch compiles to an empty patch (D-22)', () => {
+    const doc = board();
+    expect(
+      isEmptyPatch(
+        compileCommand(doc, {
+          type: 'group.update',
+          ids: ['c1'],
+          patch: { name: 'To Do', x: 0 },
+        }),
+      ),
+    ).toBe(true);
+    expect(isEmptyPatch(compileCommand(doc, { type: 'group.update', ids: [], patch: {} }))).toBe(
+      true,
+    );
+    // Duplicates are ignored — the second occurrence is not a change.
+    expect(isEmptyPatch(compileCommand(doc, { type: 'group.update', ids: ['c1', 'c1'], patch: {} }))).toBe(
+      true,
+    );
+  });
+
+  it('throws on unknown ids, bad values and invalid merged groups', () => {
+    const doc = board();
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['nope'], patch: { name: 'x' } }),
+    ).toThrow(/unknown group/);
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { name: 7 as unknown as string } }),
+    ).toThrow(/patch.name/);
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: NaN } }),
+    ).toThrow(/not finite/);
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: 0 } }),
+    ).toThrow(/bad-group-geometry/);
+    // A plain frame may not gain geometry (validateDoc rule, D-24).
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['g1'], patch: { x: 0 } }),
+    ).toThrow(/bad-group-geometry/);
+    // An explicit undefined field counts as absent (no-op, D-22) —
+    // geometry can only be REPLACED, never removed, through the patch.
+    expect(() =>
+      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: undefined as unknown as number } }),
+    ).not.toThrow();
+  });
+
+  it('do → undo gives the exact original document', () => {
+    const doc = board();
+    const frozen = deepFreeze(structuredClone(doc));
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1', 'c2'],
+      patch: { name: 'X', x: 42, y: -7, w: 300, h: 500 },
+    });
+    const next = applyPatch(doc, patch);
+    expect(validateDoc(next)).toEqual([]);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, frozen)).toBe(true);
+  });
+});
+
 describe('group.delete — remove columns, members survive (T-035, M9)', () => {
   function board(): Doc {
     const doc = docWith(

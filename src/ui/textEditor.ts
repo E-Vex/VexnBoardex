@@ -21,10 +21,13 @@
 
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
+import { columnRect, KANBAN_HEADER_H, KANBAN_PADDING } from '../core/kanban';
 import { worldToScreen } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
 import {
+  KANBAN_COLUMN_FILL,
+  KANBAN_HEADER_COLOR,
   FONT_SIZE,
   FONT_STACK,
   LINE_HEIGHT,
@@ -59,7 +62,14 @@ export interface TextEditorOptions {
 export interface TextEditor {
   /** Open the editor on a node (no-op when the node does not exist). */
   edit(nodeId: Id): void;
-  /** True when the editor is open. */
+  /**
+   * Open the editor on a KANBAN COLUMN's name (T-037): the same overlay,
+   * positioned over the column's header strip, committing ONE `group.update`
+   * on blur or Enter (a name is one line — Enter commits, never a newline).
+   * No-op when the group does not exist.
+   */
+  editColumn(groupId: Id): void;
+  /** True when the editor is open (a node or a column name). */
   isOpen(): boolean;
   /** Close without committing. */
   cancel(): void;
@@ -69,12 +79,14 @@ export interface TextEditor {
 }
 
 /** Create the overlay editor. Exactly one should exist per app. */
-export function createTextEditor(
-  opts: TextEditorOptions,
-): TextEditor {
+export function createTextEditor(opts: TextEditorOptions): TextEditor {
   const { cameraStore, docStore, uiStore, parent = document.body } = opts;
 
   let editingId: Id | null = null;
+  /** The kanban column whose name is being edited (T-037), or null. At most
+   * one of `editingId` / `editingColumnId` is ever set — the same single
+   * textarea serves both. */
+  let editingColumnId: Id | null = null;
   let suppressBlurCommit = false;
 
   // The overlay container is sized/positioned in screen space; the textarea
@@ -106,6 +118,36 @@ export function createTextEditor(
 
   /** Position and scale the overlay from the current camera (I-10). */
   function place(): void {
+    if (editingId === null && editingColumnId === null) return;
+    if (editingColumnId !== null) {
+      // T-037: over the column's header strip — the same rect the canvas
+      // renderer writes the name into (inset by the padding, the × zone
+      // reserved), so the editing view and the committed result agree.
+      const group = docStore.get().groups[editingColumnId];
+      if (!group) return;
+      const rect = columnRect(group);
+      if (rect === null) return;
+      const cam = cameraStore.get();
+      const topLeft = worldToScreen(cam, {
+        x: rect.x + KANBAN_PADDING,
+        y: rect.y,
+      });
+      host.style.transformOrigin = `${topLeft.x}px ${topLeft.y}px`;
+      host.style.transform = `scale(${cam.zoom})`;
+      host.style.left = `${topLeft.x}px`;
+      host.style.top = `${topLeft.y}px`;
+      area.style.width = `${Math.max(24, rect.w - 2 * KANBAN_PADDING - 24)}px`;
+      area.style.height = `${KANBAN_HEADER_H}px`;
+      area.style.borderRadius = '0px';
+      area.style.clipPath = '';
+      area.style.padding = '0px';
+      area.style.fontSize = '15px';
+      area.style.fontWeight = '600';
+      area.style.lineHeight = `${KANBAN_HEADER_H}px`; // one line, centred
+      area.style.color = KANBAN_HEADER_COLOR;
+      area.style.background = KANBAN_COLUMN_FILL;
+      return;
+    }
     if (editingId === null) return;
     const node = docStore.get().nodes[editingId];
     if (!node) return;
@@ -161,23 +203,23 @@ export function createTextEditor(
     }
     area.style.fontSize = `${FONT_SIZE}px`;
     area.style.lineHeight = String(LINE_HEIGHT);
-    area.style.color =
-      node.kind === 'text' ? TEXT_NODE_COLOR : NODE_TEXT_COLOR;
+    area.style.color = node.kind === 'text' ? TEXT_NODE_COLOR : NODE_TEXT_COLOR;
     // Cards and stickies show their own fill behind the text; text nodes
     // stay transparent so the board shows through, exactly like the renderer.
-    area.style.background =
-      node.kind === 'text' ? 'transparent' : node.color;
+    area.style.background = node.kind === 'text' ? 'transparent' : node.color;
   }
 
   function open(nodeId: Id): void {
     const node = docStore.get().nodes[nodeId];
     if (!node) return;
-    if (editingId !== null) {
+    if (editingColumnId !== null || editingId !== null) {
       // Commit the previous editor before switching.
       commit();
     }
     editingId = nodeId;
+    editingColumnId = null;
     uiStore.setEditing(nodeId);
+    uiStore.setEditingColumn(null);
     area.value = node.text;
     host.style.display = 'block';
     place();
@@ -185,9 +227,28 @@ export function createTextEditor(
     area.select();
   }
 
-  function close(): void {
-    if (editingId === null) return;
+  /** Open the editor on a column's header name (T-037). */
+  function openColumn(groupId: Id): void {
+    const group = docStore.get().groups[groupId];
+    if (!group) return;
+    if (editingId !== null || editingColumnId !== null) {
+      commit();
+    }
+    editingColumnId = groupId;
     editingId = null;
+    uiStore.setEditing(null);
+    uiStore.setEditingColumn(groupId);
+    area.value = group.name;
+    host.style.display = 'block';
+    place();
+    area.focus();
+    area.select();
+  }
+
+  function close(): void {
+    if (editingId === null && editingColumnId === null) return;
+    editingId = null;
+    editingColumnId = null;
     suppressBlurCommit = true;
     // Release focus deterministically before hiding, so the very next
     // keystroke targets the page (not the detached textarea) — Escape then
@@ -196,12 +257,28 @@ export function createTextEditor(
     host.style.display = 'none';
     area.value = '';
     uiStore.setEditing(null);
+    uiStore.setEditingColumn(null);
     window.setTimeout(() => {
       suppressBlurCommit = false;
     }, 0);
   }
 
   function commit(): void {
+    if (editingId === null && editingColumnId === null) return;
+    if (editingColumnId !== null) {
+      // T-037: ONE group.update per commit — a rename is one undo step.
+      const id = editingColumnId;
+      const group = docStore.get().groups[id];
+      if (group && area.value !== group.name) {
+        docStore.dispatch({
+          type: 'group.update',
+          ids: [id],
+          patch: { name: area.value },
+        });
+      }
+      close();
+      return;
+    }
     if (editingId === null) return;
     const id = editingId;
     const node = docStore.get().nodes[id];
@@ -227,6 +304,14 @@ export function createTextEditor(
       e.preventDefault();
       suppressBlurCommit = true;
       close();
+      return;
+    }
+    // T-037: a column name is ONE line — any Enter commits it (never a
+    // newline, and never a claimed nav key: the mind-map cadence owns node
+    // editors only). IME confirmation is never stolen (D-27).
+    if (editingColumnId !== null && e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      commit();
       return;
     }
     // T-030: a plain, unmodified Enter/Tab outside IME composition can be
@@ -262,18 +347,19 @@ export function createTextEditor(
 
   // Reposition while the camera moves (pan/zoom under an open editor).
   cameraStore.subscribe(() => {
-    if (editingId !== null) place();
+    if (editingId !== null || editingColumnId !== null) place();
   });
 
   // The node's own geometry can change while editing (resize preview):
   // re-place on document changes too.
   docStore.subscribe(() => {
-    if (editingId !== null) place();
+    if (editingId !== null || editingColumnId !== null) place();
   });
 
   return {
     edit: open,
-    isOpen: () => editingId !== null,
+    editColumn: openColumn,
+    isOpen: () => editingId !== null || editingColumnId !== null,
     cancel: () => {
       suppressBlurCommit = true;
       close();

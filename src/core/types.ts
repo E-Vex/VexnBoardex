@@ -137,8 +137,19 @@ export type Command =
   | { type: 'node.create'; node: Node }
   | { type: 'node.move'; ids: Id[]; dx: number; dy: number }
   | { type: 'node.delete'; ids: Id[] }
-  | { type: 'node.duplicate'; ids: Id[]; offsetX?: number; offsetY?: number; newIds: Id[]; newEdgeIds: Id[] }
-  | { type: 'node.zOrder'; ids: Id[]; mode: 'front' | 'back' | 'forward' | 'backward' }
+  | {
+      type: 'node.duplicate';
+      ids: Id[];
+      offsetX?: number;
+      offsetY?: number;
+      newIds: Id[];
+      newEdgeIds: Id[];
+    }
+  | {
+      type: 'node.zOrder';
+      ids: Id[];
+      mode: 'front' | 'back' | 'forward' | 'backward';
+    }
   | { type: 'node.update'; ids: Id[]; patch: NodeContentPatch }
   | { type: 'node.resize'; id: Id; x: number; y: number; w: number; h: number }
   | { type: 'group.assign'; groupId: Id; name: string; ids: Id[] }
@@ -151,6 +162,14 @@ export type Command =
    * BEFORE any card joins it (an empty column is the default kanban state).
    */
   | { type: 'group.create'; group: Group }
+  /**
+   * Update the listed groups' content (T-037, M9 — kanban column polish):
+   * the name and, for columns, the stored geometry. The same command covers
+   * rename, resize and move — one command, one undo step, mirroring
+   * `node.update`/`node.resize`. The `role` is structural and NOT patchable
+   * (a column becoming a plain frame would leave dangling card slots).
+   */
+  | { type: 'group.update'; ids: Id[]; patch: GroupContentPatch }
   /**
    * Delete the listed groups (T-035, M9): their member nodes survive,
    * ungrouped, in the SAME patch — one undo restores the groups and every
@@ -187,6 +206,22 @@ export interface NodeContentPatch {
   color?: string;
   tags?: string[];
   shape?: NodeShape;
+}
+
+/**
+ * The editable content fields of a group (T-037, M9 — kanban column polish):
+ * the name (a plain frame's label, a column's header title) and — for a
+ * kanban column — the STORED geometry (x/y/w/h). Absent fields keep their
+ * values; the merged result must satisfy `groupViolations` (a column needs
+ * all four, finite, w > 0, h > 0 — a plain frame may carry NO geometry).
+ * `role` is deliberately absent: it is structural, not content.
+ */
+export interface GroupContentPatch {
+  name?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
 }
 
 /**

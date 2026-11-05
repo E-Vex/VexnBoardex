@@ -149,3 +149,13 @@ export const KANBAN_HEADER_COLOR = '#c9cede';
 
 /** The × close affordance ink. */
 export const KANBAN_CLOSE_COLOR = 'rgba(201, 206, 222, 0.75)';
+
+/**
+ * Drop-target highlight (T-037): the wash painted OVER the target column's
+ * panel fill while a card drag is over it — an accent tint, like the tag
+ * bar's selection language.
+ */
+export const KANBAN_HIGHLIGHT_FILL = 'rgba(245, 166, 35, 0.14)';
+
+/** The drop-target highlight border (T-037): the accent selection colour. */
+export const KANBAN_HIGHLIGHT_BORDER = 'rgba(245, 166, 35, 0.8)';

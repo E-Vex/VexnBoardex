@@ -10,7 +10,11 @@
 // [-120, 120], Done [160, 400], all y [-200, 200]. On screen:
 // To Do [240, 480], Doing [520, 760], Done [800, 1040], y [160, 560].
 // Card slots: x = column.x + 16, slot 0 y = column.y + 52 (header 36 +
-// padding 16); a default card is 200×120, so slot 1 sits 132 lower.
+// padding 16); a card born in a column fills the INNER width (208 at the
+// default 240 — T-037), so slot 1 sits 132 lower. Column affordances
+// (T-037): the header strip is world y [column.y, column.y + 36] and the
+// resize handles sit on the right-edge midpoint, bottom-edge midpoint and
+// bottom-right corner of the effective rect.
 import { expect, test, type Page } from '@playwright/test';
 
 const VIEWPORT = { width: 1280, height: 720 };
@@ -376,5 +380,200 @@ test.describe('kanban — columns and card snapping @ 1280×720', () => {
     await page.keyboard.press('F2');
     await expect(page.locator('#vex-text-editor')).toHaveValue('Task');
     await page.keyboard.press('Escape');
+  });
+
+  // ── T-037: column drag / rename / resize, auto-grow, drop-target highlight ──
+
+  // The To Do header strip (clear of the × zone): world (-340, -182).
+  const TODO_HEADER: [number, number] = [300, 178];
+  // The To Do right-edge resize handle: world (-160, 0).
+  const TODO_RIGHT_HANDLE: [number, number] = [480, 360];
+  // The To Do bottom-edge resize handle (empty column): world (-280, 200).
+  const TODO_BOTTOM_HANDLE: [number, number] = [360, 560];
+  // To Do's card-centre press point (a 208-wide seated card): world (-280, -88).
+  const TODO_CARD_CENTRE: [number, number] = [360, 272];
+
+  test('9. dragging a column by its header moves it WITH its cards — one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — one seated card
+
+    // Press the To Do header and drag DOWN by 300 world units.
+    await page.mouse.move(TODO_HEADER[0], TODO_HEADER[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_HEADER[0], TODO_HEADER[1] + 300, { steps: 10 });
+
+    // Mid-drag the PREVIEW is already painted at the destination: the
+    // panel below the old bottom (world (-390, 250) → screen (250, 610))…
+    await expectPainted(page, 250, 610);
+    // …and the card travelled with it (world (-290, 212) → screen (350, 572),
+    // the interior of the previewed card).
+    await expectPainted(page, 350, 572);
+
+    await page.mouse.up();
+    // ONE batch: the column geometry AND the card moved together.
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    // A header press selects the members first (the frame-click behaviour).
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    // The old header area is bare background again.
+    await expectCleared(page, 250, 178);
+
+    // ONE undo restores the column AND the card.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expectCleared(page, 250, 610);
+    await expectCleared(page, 350, 572);
+    await expectPainted(page, 250, 178);
+  });
+
+  test('10. double-clicking a header renames the column — one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+
+    // Double-click the To Do header: the overlay opens ON THE NAME.
+    await page.mouse.dblclick(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await expect(page.locator('#vex-text-editor')).toHaveValue('To Do');
+
+    // A column name is one line: plain Enter commits (no newline, no card).
+    await page.keyboard.type('Backlog');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 0');
+
+    // Reopening shows the committed name; Escape cancels without a dispatch.
+    await page.mouse.dblclick(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Backlog');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+
+    // ONE undo restores the old name.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await page.mouse.dblclick(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.locator('#vex-text-editor')).toHaveValue('To Do');
+    await page.keyboard.press('Escape');
+  });
+
+  test('11. resizing a column wider stretches its cards — one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — one seated (208-wide) card
+
+    // Drag the right-edge handle right by 80 world units: 240 → 320 wide.
+    await page.mouse.move(TODO_RIGHT_HANDLE[0], TODO_RIGHT_HANDLE[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_RIGHT_HANDLE[0] + 80, TODO_RIGHT_HANDLE[1], {
+      steps: 10,
+    });
+    // Mid-drag the PREVIEW is wider already — the panel reaches into the gap
+    // between To Do and Doing (world (-140, 150) → screen (500, 510))…
+    await expectPainted(page, 500, 510);
+    // …and the card is stretched to the inner width 288 (world (-140, -50) →
+    // screen (500, 310), previously bare background right of the column).
+    await expectPainted(page, 500, 310);
+
+    await page.mouse.up();
+    // ONE batch: the geometry AND the re-fitted card.
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expectPainted(page, 500, 510);
+    await expectPainted(page, 500, 310);
+
+    // ONE undo restores the width AND the card's size.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expectCleared(page, 500, 510);
+    await expectCleared(page, 500, 310);
+  });
+
+  test('12. a column auto-grows to fit its cards; undo un-grows with them', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+
+    // Three cards stack to content height 452 > the stored 400. Each
+    // double-click lands in the empty padding strip between the header and
+    // the stack's top (world y -155), so every click is empty space and
+    // each new card is born ABOVE the previous one.
+    await createCardInTodo(page, [356, 205]); // rev 2
+    await createCardInTodo(page, [356, 205]); // rev 3
+    await createCardInTodo(page, [356, 205]); // rev 4
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 3');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+
+    // The panel reaches below the old bottom (world (-390, 230) → (250, 590)):
+    // grown to the cards, without clipping them.
+    await expectPainted(page, 250, 590);
+
+    // ONE undo removes the third card AND the growth with it.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 5');
+    await expectCleared(page, 250, 590);
+  });
+
+  test('13. dragging the bottom-edge handle makes the column taller', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2
+
+    // Drag the bottom-edge handle down 60 world units: stored 400 → 460.
+    await page.mouse.move(TODO_BOTTOM_HANDLE[0], TODO_BOTTOM_HANDLE[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_BOTTOM_HANDLE[0], TODO_BOTTOM_HANDLE[1] + 60, {
+      steps: 10,
+    });
+    // Mid-drag the taller PREVIEW is painted below the old bottom.
+    await expectPainted(page, 250, 590);
+
+    await page.mouse.up();
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expectPainted(page, 250, 590); // the column is now 460 tall
+
+    // ONE undo restores the stored height.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expectCleared(page, 250, 590);
+  });
+
+  test('14. a card drag highlights the column under it — and only that one', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250], 'Task'); // rev 3 (batch + text)
+
+    const panel = await panelColor(page);
+
+    // Drag the card over Doing's body (world (40, 40)).
+    await page.mouse.move(TODO_CARD_CENTRE[0], TODO_CARD_CENTRE[1]);
+    await page.mouse.down();
+    await page.mouse.move(680, 400, { steps: 10 });
+
+    // Mid-drag: Doing's panel is highlighted — a different wash than the
+    // plain panel colour (probe world (-90, 150) → screen (550, 510), clear
+    // of the dragged card, which previews glued to Doing's slot 0 above it).
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 550, 510), panel))
+      .toBe(false);
+
+    // Leaving every column clears the highlight again.
+    await page.mouse.move(200, 400, { steps: 10 }); // world (-440, 40)
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 550, 510), panel))
+      .toBe(true);
+
+    // Release outside: the card is freed, one batch (T-035 semantics).
+    await page.mouse.up();
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
   });
 });
