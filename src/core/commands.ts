@@ -6,7 +6,7 @@
  * patch. IDs come from the caller (D-11).
  */
 
-import type { Command, NodeContentPatch, EdgeContentPatch } from './types';
+import type { Command, NodeContentPatch, EdgeContentPatch, GroupContentPatch } from './types';
 import type { Doc, Group } from './types';
 import type { EntityChange, Patch } from './types';
 import type { Anchor, Edge, EdgeRoute, Id, Node } from './types';
@@ -470,6 +470,82 @@ function compileGroupCreate(doc: Doc, group: Group): Patch {
     edges: {},
     groups: { [group.id]: { after: group } },
   };
+}
+
+/**
+ * Compile `group.update` (T-037, M9 — kanban column polish): apply a content
+ * patch (name, and for columns the stored geometry) to every listed group.
+ * Unknown ids throw; invalid patch values throw; the MERGED group must pass
+ * `groupViolations` — a plain frame given geometry, or a column left with
+ * incomplete/non-positive geometry, throws instead of corrupting the
+ * document (commands are data, D-22). A patch that changes nothing (or empty
+ * ids) compiles to an empty patch — one command, one undo step.
+ */
+function compileGroupUpdate(doc: Doc, ids: Id[], patch: GroupContentPatch): Patch {
+  if (patch === null || typeof patch !== 'object') {
+    throw new CommandError('group.update: patch is not an object');
+  }
+  if (patch.name !== undefined && !isString(patch.name)) {
+    throw new CommandError('group.update: patch.name is not a string');
+  }
+  for (const key of ['x', 'y', 'w', 'h'] as const) {
+    const value = patch[key];
+    if (value !== undefined && !Number.isFinite(value)) {
+      throw new CommandError(`group.update: patch.${key} is not finite`);
+    }
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist — unknown ids throw even when the patch changes
+  // nothing (the same rule node.update follows).
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.groups, id)) {
+      throw new CommandError(`group.update: unknown group "${id}"`);
+    }
+  }
+
+  if (uniqueIds.length === 0) return emptyPatch();
+
+  const groups: Patch['groups'] = {};
+  for (const id of uniqueIds) {
+    const before = doc.groups[id]!;
+    const after: Group = {
+      ...before,
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.x !== undefined ? { x: patch.x } : {}),
+      ...(patch.y !== undefined ? { y: patch.y } : {}),
+      ...(patch.w !== undefined ? { w: patch.w } : {}),
+      ...(patch.h !== undefined ? { h: patch.h } : {}),
+    };
+    // The merged group must stay valid (D-24 rules via groupViolations) —
+    // a no-op patch skips this naturally (after === before).
+    const violations = groupViolations(after, id);
+    if (violations.length > 0) {
+      throw new CommandError(`group.update: ${violations.join('; ')}`);
+    }
+    if (
+      after.name === before.name &&
+      after.x === before.x &&
+      after.y === before.y &&
+      after.w === before.w &&
+      after.h === before.h
+    ) {
+      continue;
+    }
+    groups[id] = { before, after };
+  }
+
+  if (Object.keys(groups).length === 0) return emptyPatch();
+  return { nodes: {}, edges: {}, groups };
 }
 
 /**
@@ -1071,6 +1147,8 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileGroupUnassign(doc, command.ids);
     case 'group.create':
       return compileGroupCreate(doc, command.group);
+    case 'group.update':
+      return compileGroupUpdate(doc, command.ids, command.patch);
     case 'group.delete':
       return compileGroupDelete(doc, command.ids);
     case 'node.setGroup':
