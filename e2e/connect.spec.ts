@@ -129,7 +129,9 @@ test.describe('connect @ 1280×720', () => {
       .toBe(false);
 
     // New board clears it and the autosave survives a reload.
-    await page.getByRole('button', { name: 'New' }).click();
+    // (exact: T-034 added a "New from Template" toolbar button, so the
+    // accessible name must pin the plain "New" board button exactly.)
+    await page.getByRole('button', { name: 'New', exact: true }).click();
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 0');
     await page.waitForTimeout(300);
     await page.reload();

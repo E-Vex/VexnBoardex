@@ -10,6 +10,7 @@ import './style.css';
 import type { Node, Edge, Doc } from './core/types';
 import { emptyDoc } from './core/doc';
 import { createDocStore } from './core/store';
+import { serializeDoc, deserializeDoc, type FileEnvelope } from './core/serialize';
 import { attachCameraInput } from './input/cameraInput';
 import { createCursorTracker } from './input/cursor';
 import { attachNodeInput } from './input/nodeInput';
@@ -27,6 +28,7 @@ import { renderBoard } from './view/renderer';
 import { setImageLoadedCallback } from './view/imageCache';
 import { createUiStore, pruneSelection, pruneEdgeSelection } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
+import { saveTemplate, listTemplates, deleteTemplate, type TemplateRecord } from './io/templates';
 import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
 import { renderDocToPng } from './view/pngExport';
 import { createNodeAt } from './input/cardCommand';
@@ -415,18 +417,24 @@ function createToolbar(): void {
     isDisabled?: () => boolean;
     /** Dynamic label (T-029): re-read on every store change. */
     getText?: () => string;
+    /** Stable id for e2e/test selectors (optional). */
+    testid?: string;
   };
 
   const buttons: { element: HTMLButtonElement; config: ButtonConfig }[] = [];
 
-  const makeBtn = (config: ButtonConfig) => {
+  const makeBtn = (config: ButtonConfig): HTMLButtonElement => {
     const btn = document.createElement('button');
     btn.textContent = config.text;
+    if (config.testid !== undefined) {
+      btn.dataset.testid = config.testid;
+    }
     btn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
     btn.disabled = config.isDisabled ? config.isDisabled() : false;
     btn.onclick = config.onClick;
     buttons.push({ element: btn, config });
     toolbar.appendChild(btn);
+    return btn;
   };
 
   makeBtn({ text: '↶ Undo', onClick: () => docStore.undo(), isDisabled: () => !docStore.canUndo() });
@@ -567,6 +575,62 @@ function createToolbar(): void {
     },
     isDisabled: () => docStore.get().order.length === 0,
   });
+
+  // M9 (T-034): templates — save the current board under a name, start a
+  // new board from a saved one. Templates live in IndexedDB like the
+  // autosave and ARE saved documents (D-14): the envelope (doc + view) is
+  // exactly what serializeDoc produces, and "New from template" applies it
+  // the same way Import does — replace, clear the selection, restore the
+  // saved camera, autosave picks the new content up from the next change.
+  const templateList = createTemplateList();
+
+  const templateNameInput = document.createElement('input');
+  templateNameInput.id = 'vex-template-name';
+  templateNameInput.dataset.testid = 'template-name-input';
+  templateNameInput.placeholder = 'Template name…';
+  templateNameInput.style.cssText = `
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    color: #e8e8ef;
+    width: 130px;
+    outline: none;
+  `;
+  toolbar.appendChild(templateNameInput);
+  const saveTemplateBtn = makeBtn({
+    // Save the current board as a named template. Saving never touches the
+    // current document — one click, no revision change, no undo entry.
+    text: 'Save as Template',
+    testid: 'save-template',
+    onClick: () => {
+      const name = templateNameInput.value.trim();
+      if (name === '') return;
+      const envelope = JSON.parse(
+        serializeDoc(docStore.get(), store.get()),
+      ) as FileEnvelope;
+      void saveTemplate(name, envelope)
+        .then(() => {
+          templateNameInput.value = '';
+          saveTemplateBtn.disabled = true;
+          void templateList.refresh();
+          templateList.open();
+        })
+        .catch((e) => console.error('[templates] save failed:', e));
+    },
+    isDisabled: () => templateNameInput.value.trim() === '',
+  });
+  templateNameInput.oninput = () => {
+    saveTemplateBtn.disabled = templateNameInput.value.trim() === '';
+  };
+
+  makeBtn({
+    text: 'New from Template',
+    testid: 'new-from-template',
+    onClick: () => void templateList.toggle(),
+  });
+
   makeBtn({
     text: 'Import',
     onClick: async () => {
@@ -619,6 +683,143 @@ function createToolbar(): void {
   document.body.appendChild(toolbar);
 }
 createToolbar();
+
+/**
+ * The saved-templates panel (T-034): a list of the templates in IndexedDB,
+ * newest first, under the toolbar. Each row applies the template to a fresh
+ * board (like Import: replace, clear selection, restore the saved camera —
+ * replace wipes history by design) or deletes it. Refreshes on open, save and
+ * delete; closing and reopening always re-reads the store.
+ */
+function createTemplateList(): {
+  open(): void;
+  close(): void;
+  toggle(): Promise<void>;
+  refresh(): Promise<void>;
+} {
+  const panel = document.createElement('div');
+  panel.id = 'vex-template-list';
+  panel.dataset.testid = 'template-list';
+  panel.style.cssText = `
+    position: fixed;
+    top: 56px;
+    left: 12px;
+    z-index: 110;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    width: 280px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 8px;
+    font: 13px system-ui, sans-serif;
+    color: #e8e8ef;
+  `;
+  document.body.appendChild(panel);
+
+  /** Apply a template to a fresh board (the Import semantics, T-018). */
+  function applyTemplate(record: TemplateRecord): void {
+    try {
+      const result = deserializeDoc(JSON.stringify(record.envelope));
+      docStore.replace(result.envelope.doc);
+      uiStore.setSelection([]);
+      if (result.envelope.view) {
+        store.set({
+          x: result.envelope.view.x,
+          y: result.envelope.view.y,
+          zoom: result.envelope.view.zoom,
+        });
+      }
+      for (const w of result.warnings) console.warn('[template]', w);
+      close();
+    } catch (e) {
+      console.error('[template] apply failed:', e);
+    }
+  }
+
+  /** Re-read the store and render the rows (newest first). */
+  async function refresh(): Promise<void> {
+    let records: TemplateRecord[] = [];
+    try {
+      records = await listTemplates();
+    } catch (e) {
+      console.error('[templates] list failed:', e);
+    }
+    panel.innerHTML = '';
+    if (records.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No templates yet.';
+      empty.style.opacity = '0.6';
+      panel.appendChild(empty);
+      return;
+    }
+    for (const record of records) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+
+      const item = document.createElement('button');
+      item.dataset.testid = 'template-item';
+      item.style.cssText = `
+        flex: 1;
+        text-align: left;
+        padding: 6px 8px;
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #e8e8ef;
+      `;
+      const nodeCount = Object.keys(record.envelope.doc?.nodes ?? {}).length;
+      item.textContent = `${record.name} — ${nodeCount} nodes`;
+      item.onclick = () => applyTemplate(record);
+      row.appendChild(item);
+
+      const del = document.createElement('button');
+      del.dataset.testid = 'template-delete';
+      del.title = `Delete ${record.name}`;
+      del.textContent = '×';
+      del.style.cssText = `
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #e8e8ef;
+      `;
+      del.onclick = () => {
+        void deleteTemplate(record.id)
+          .then(() => refresh())
+          .catch((e) => console.error('[templates] delete failed:', e));
+      };
+      row.appendChild(del);
+
+      panel.appendChild(row);
+    }
+  }
+
+  function open(): void {
+    panel.style.display = 'flex';
+    void refresh();
+  }
+
+  function close(): void {
+    panel.style.display = 'none';
+  }
+
+  async function toggle(): Promise<void> {
+    if (panel.style.display === 'none') {
+      open();
+    } else {
+      close();
+    }
+  }
+
+  return { open, close, toggle, refresh };
+}
 
 // Initial paint — renders on demand, never in a continuous loop (D-10).
 host.requestRender();
