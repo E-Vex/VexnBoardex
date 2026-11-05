@@ -322,6 +322,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -368,6 +369,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -392,6 +394,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(node), {
       selection: ['a'],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -420,6 +423,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       const ctx = createStubCtx();
       renderBoard(ctx, { width: 1280, height: 720 }, zc, docOf(node), {
         selection: ['a'],
+        edgeSelection: [],
         drag: null,
         connect: null,
         editing: null,
@@ -446,6 +450,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(off, on), {
       selection: ['off', 'on'],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -474,6 +479,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -504,6 +510,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: [],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -525,6 +532,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a, b), {
       selection: ['a'],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -549,6 +557,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docOf(a), {
       selection: ['a'],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
       connect: null,
       editing: null,
@@ -618,6 +627,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -645,6 +655,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     // Drag node 'a' by (50, 25)
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: ['a'],
+      edgeSelection: [],
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -668,6 +679,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -694,6 +706,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -716,6 +729,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithEdge(a, b, edge), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -755,6 +769,7 @@ describe('renderBoard — group frames (T-024)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, docWithFrameAndEdge(), {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -796,6 +811,7 @@ describe('renderBoard — group frames (T-024)', () => {
     const ctx = createStubCtx();
     renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, {
       selection: [],
+      edgeSelection: [],
       drag: null,
       connect: null,
       editing: null,
@@ -807,5 +823,157 @@ describe('renderBoard — group frames (T-024)', () => {
 
     // Only the two node bodies use arcTo: 4 arcTo per roundRect × 2 nodes.
     expect(countCalls(ctx, 'arcTo')).toBe(8);
+  });
+});
+
+// T-033 — orthogonal routing: the renderer draws the elbow polyline, the
+// selected edge paints in the accent colour, and the label follows the arc.
+describe('renderBoard — orthogonal edge rendering (T-033)', () => {
+  const cam = cameraCenteredOn({ x: 0, y: 0 }, 1280, 720, 1);
+
+  // a (-300, -60, 200×120), b (300, 100, 200×120): centers (-200, 0) and
+  // (400, 160). Orthogonal auto/auto → from right (-100, 0), to left
+  // (300, 160), H→H Z-route with the middle vertical at x = 100.
+  function orthogonalDoc(): { doc: Doc; a: Node; b: Node } {
+    const a = makeNode('a', { x: -300, y: -60, w: 200, h: 120 });
+    const b = makeNode('b', { x: 300, y: 100, w: 200, h: 120 });
+    const doc = docOf(a, b);
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+      route: 'orthogonal',
+    };
+    return { doc, a, b };
+  }
+
+  const ui = {
+    selection: [],
+    edgeSelection: [],
+    drag: null,
+    connect: null,
+    editing: null,
+    resize: null,
+    tagFilter: [],
+    boxSelect: null,
+    mode: 'select' as const,
+  };
+
+  it('draws the elbow: three lineTo calls through the mid-x at x = 100', () => {
+    const { doc } = orthogonalDoc();
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, ui);
+
+    // The Z-route: (-100, 0) → (100, 0) → (100, 160) → (300, 160).
+    expect(
+      ctx.calls.find((c) => c.name === 'moveTo' && c.args[0] === -100 && c.args[1] === 0),
+    ).toBeDefined();
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 0),
+    ).toBeDefined();
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100 && c.args[1] === 160),
+    ).toBeDefined();
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160),
+    ).toBeDefined();
+    // The arrowhead points along the LAST segment (horizontal): its side
+    // points sit at x = 300 − ARROWHEAD_SIZE·cos(30°) ≈ 291.34, y = 160 ± 5.
+    const arrowSide = ctx.calls.find(
+      (c) =>
+        c.name === 'lineTo' &&
+        Math.abs((c.args[0] as number) - 291.34) < 0.01 &&
+        Math.abs((c.args[1] as number) - 165) < 0.01,
+    );
+    expect(arrowSide).toBeDefined();
+  });
+
+  it('the selected edge strokes and fills in the accent colour', () => {
+    const { doc } = orthogonalDoc();
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, {
+      ...ui,
+      edgeSelection: ['e1'],
+    });
+
+    // One strokeStyle/lineWidth pair for the edge polyline uses the accent
+    // (EDGE_SELECTED_COLOR '#f5a623') and width 3 — thicker than normal.
+    expect(
+      ctx.calls.some((c) => c.name === 'strokeStyle' && c.args[0] === '#f5a623'),
+    ).toBe(true);
+    expect(ctx.calls.some((c) => c.name === 'lineWidth' && c.args[0] === 3)).toBe(
+      true,
+    );
+    // The arrowhead fill is accent too.
+    expect(ctx.calls.some((c) => c.name === 'fillStyle' && c.args[0] === '#f5a623')).toBe(
+      true,
+    );
+  });
+
+  it('an unselected edge keeps the classic EDGE_COLOR', () => {
+    const { doc } = orthogonalDoc();
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, ui);
+    expect(
+      ctx.calls.some((c) => c.name === 'strokeStyle' && c.args[0] === '#8a8a9a'),
+    ).toBe(true);
+  });
+
+  it('the label sits at the arc midpoint (here (100, 80), exact)', () => {
+    const { doc } = orthogonalDoc();
+    doc.edges['e1']!.label = 'goes';
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, ui);
+
+    // Route lengths: 200 + 160 + 200 = 560; half is 280 → 200 along the
+    // first leg, then 80 down the vertical middle segment → (100, 80).
+    // (For a straight edge this same probe pinned the segment midpoint in
+    // the T-010 tests — both agree there, by construction.)
+    const label = ctx.calls.find(
+      (c) => c.name === 'fillText' && c.args[0] === 'goes',
+    );
+    expect(label).toBeDefined();
+    expect(label!.args[1]).toBeCloseTo(100, 6);
+    expect(label!.args[2]).toBeCloseTo(80, 6);
+  });
+
+  it('an orthogonal edge follows a resize preview (T-021 comment contract)', () => {
+    const { doc, b } = orthogonalDoc();
+    const ctx = createStubCtx();
+    // Shrink b to (300, 100, 100×60): its left midpoint becomes (300, 130).
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, {
+      ...ui,
+      resize: { id: 'b', x: b.x, y: b.y, w: 100, h: 60 },
+    });
+    // The last leg of the elbow now lands at y = 130, not 160.
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 130),
+    ).toBeDefined();
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 160),
+    ).toBeUndefined();
+  });
+
+  it('a straight-routed edge still draws exactly one lineTo (pre-route files)', () => {
+    const a = makeNode('a', { x: -300, y: -60, w: 200, h: 120 });
+    const b = makeNode('b', { x: 300, y: -60, w: 200, h: 120 });
+    const doc = docOf(a, b);
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+    };
+    const ctx = createStubCtx();
+    renderBoard(ctx, { width: 1280, height: 720 }, cam, doc, ui);
+    // The straight arrow: moveTo (-100, 0) then ONE lineTo to (300, 0).
+    expect(
+      ctx.calls.find(
+        (c) => c.name === 'lineTo' && c.args[0] === 300 && c.args[1] === 0,
+      ),
+    ).toBeDefined();
+    // No lineTo to any mid-x elbow point (100, 0).
+    expect(
+      ctx.calls.find((c) => c.name === 'lineTo' && c.args[0] === 100),
+    ).toBeUndefined();
   });
 });

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { emptyDoc, validateDoc } from './doc';
-import type { Doc } from './types';
+import type { Doc, Edge } from './types';
 import { serializeDoc, deserializeDoc, coerceDoc, FILE_VERSION } from './serialize';
 
 function makeDoc(): Doc {
@@ -311,5 +311,67 @@ describe('serialize — node shape field (T-032, M9)', () => {
     });
     expect(bad.nodes['a']!.shape).toBeUndefined();
     expect(validateDoc(bad)).toEqual([]);
+  });
+});
+
+describe('serialize — edge route field (T-033, M9)', () => {
+  /** A minimal doc with an edge whose route is `route`. */
+  function docWithRoute(route?: 'auto' | 'straight' | 'orthogonal'): Doc {
+    const doc = emptyDoc();
+    for (const id of ['a', 'b']) {
+      doc.nodes[id] = {
+        id,
+        kind: 'card',
+        x: id === 'a' ? 0 : 300,
+        y: 0,
+        w: 100,
+        h: 100,
+        text: '',
+        color: '#fff',
+        tags: [],
+      };
+    }
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+      ...(route !== undefined ? { route } : {}),
+    };
+    doc.order = ['a', 'b'];
+    return doc;
+  }
+
+  it('round-trips each of the three routes', () => {
+    for (const route of ['auto', 'straight', 'orthogonal'] as const) {
+      const doc = docWithRoute(route);
+      const back = deserializeDoc(serializeDoc(doc));
+      expect(back.envelope.doc.edges['e1']!.route).toBe(route);
+      expect(back.warnings).toEqual([]);
+    }
+  });
+
+  it('an edge written before routes exist round-trips with no route', () => {
+    const back = deserializeDoc(serializeDoc(docWithRoute()));
+    expect(back.envelope.doc.edges['e1']!.route).toBeUndefined();
+    expect(back.warnings).toEqual([]);
+  });
+
+  it('deserialize warns about an invalid route (I-08: report, never hide)', () => {
+    const doc = docWithRoute();
+    doc.edges['e1']!.route = 'curved' as Edge['route'];
+    const back = deserializeDoc(serializeDoc(doc));
+    expect(back.warnings.some((w) => w.includes('bad-route:'))).toBe(true);
+    // The data is preserved, not dropped (I-08).
+    expect(back.envelope.doc.edges['e1']!.route).toBe('curved');
+  });
+
+  it('coerceDoc preserves a valid route and drops an invalid one', () => {
+    const good = coerceDoc(docWithRoute('orthogonal'));
+    expect(good.edges['e1']!.route).toBe('orthogonal');
+    const bad = coerceDoc(docWithRoute());
+    bad.edges['e1']!.route = 'zigzag' as Edge['route'];
+    const fixed = coerceDoc(bad);
+    expect(fixed.edges['e1']!.route).toBeUndefined();
+    expect(validateDoc(fixed)).toEqual([]);
   });
 });

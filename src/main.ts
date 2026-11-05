@@ -25,7 +25,7 @@ import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
 import { setImageLoadedCallback } from './view/imageCache';
-import { createUiStore, pruneSelection } from './view/uiStore';
+import { createUiStore, pruneSelection, pruneEdgeSelection } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
 import { renderDocToPng } from './view/pngExport';
@@ -95,11 +95,18 @@ store.subscribe(() => {
 
 // Document changes → prune the selection to existing ids (D-27), re-render
 // and HUD refresh. Pruning first, so the HUD never shows a stale count.
+// Edge selections prune the same way (T-033): a deleted node cascades its
+// edges away (I-09), so the edge selection must never keep a stale id.
 docStore.subscribe((doc) => {
   const selection = uiStore.get().selection;
   const pruned = pruneSelection(selection, doc);
   if (pruned !== selection) {
     uiStore.setSelection(pruned);
+  }
+  const edgeSelection = uiStore.get().edgeSelection;
+  const prunedEdges = pruneEdgeSelection(edgeSelection, doc);
+  if (prunedEdges !== edgeSelection) {
+    uiStore.setEdgeSelection(prunedEdges);
   }
   host.requestRender();
   refreshHud();

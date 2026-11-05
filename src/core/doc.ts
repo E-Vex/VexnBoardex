@@ -5,7 +5,7 @@
  * without affecting other documents.
  */
 
-import type { Doc, Id, NodeShape } from './types';
+import type { Doc, Id, NodeShape, EdgeRoute } from './types';
 
 /** A fresh `{ nodes: {}, edges: {}, groups: {}, order: [] }` each call. */
 export function emptyDoc(): Doc {
@@ -25,6 +25,13 @@ export const VALID_SHAPES: ReadonlySet<NodeShape> = new Set([
   'stadium',
 ]);
 
+/** The three valid edge routes (T-033, D-24-style central definition). */
+export const VALID_ROUTES: ReadonlySet<EdgeRoute> = new Set([
+  'auto',
+  'straight',
+  'orthogonal',
+]);
+
 /**
  * `validateDoc` — returns a list of violation messages, empty when the
  * document is valid (T-006 R3, PLAN D-24). Pure: never mutates.
@@ -41,6 +48,8 @@ export const VALID_SHAPES: ReadonlySet<NodeShape> = new Set([
  * - `bad-src:` — a `src` that is present but not a string (T-023).
  * - `bad-shape:` — a `shape` that is present but not one of the four node
  *   shapes (T-032).
+ * - `bad-route:` — an edge `route` that is present but not one of the three
+ *   edge routes (T-033).
  */
 export function validateDoc(doc: Doc): string[] {
   const errors: string[] = [];
@@ -152,6 +161,16 @@ export function validateDoc(doc: Doc): string[] {
     if (node.shape !== undefined && !VALID_SHAPES.has(node.shape)) {
       errors.push(
         `bad-shape: node "${id}" has invalid shape ${JSON.stringify(node.shape)}`,
+      );
+    }
+  }
+
+  // bad-route: a route that is not one of the three (T-033). Absent is
+  // valid — it means 'auto' — so pre-route files never fail here.
+  for (const [id, edge] of Object.entries(doc.edges)) {
+    if (edge.route !== undefined && !VALID_ROUTES.has(edge.route)) {
+      errors.push(
+        `bad-route: edge "${id}" has invalid route ${JSON.stringify(edge.route)}`,
       );
     }
   }

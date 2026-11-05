@@ -27,6 +27,7 @@ import {
   hitTestResizeHandles,
   groupMembersOf,
   groupFrameAt,
+  edgeAt,
 } from '../core/hitTest';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
@@ -74,6 +75,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       switch (effect.type) {
         case 'select':
           uiStore.setSelection(effect.ids);
+          break;
+        case 'selectEdge':
+          uiStore.setEdgeSelection(effect.ids);
           break;
         case 'setDrag':
           uiStore.setDrag(effect.drag);
@@ -155,9 +159,10 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     }
   }
 
-  /** The machine context: the selection as of this event. */
+  /** The machine context: the selections as of this event. */
   function currentCtx(): SelectCtx {
-    return { selection: uiStore.get().selection };
+    const ui = uiStore.get();
+    return { selection: ui.selection, edgeSelection: ui.edgeSelection };
   }
 
   /** Feed one event, apply its effects, sync capture. */
@@ -211,7 +216,14 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get(), selection);
     if (hit !== null && hit.type === 'handle') return;
     const hitId = hit !== null ? hit.id : null;
-    if (hitId === null && !e.shiftKey) {
+    // T-033: with nothing else under the pointer, an EDGE can be — it sits
+    // above frames but below nodes on the board, so it wins over the frame
+    // click target. Resolved here with `edgeAt`; the machine consumes the id.
+    const hitEdgeId =
+      hitId === null
+        ? edgeAt(docStore.get(), world, cameraStore.get().zoom)
+        : null;
+    if (hitId === null && !e.shiftKey && hitEdgeId === null) {
       // A press on empty space inside a group FRAME selects all its members
       // (T-024) instead of starting a marquee. Dragging any member afterwards
       // moves the whole group (the machine unions the group's ids).
@@ -238,6 +250,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       shiftKey: e.shiftKey,
       resize: null,
       groupIds: hitId !== null ? groupMembersOf(docStore.get(), hitId) : [],
+      hitEdgeId,
     });
   }
 

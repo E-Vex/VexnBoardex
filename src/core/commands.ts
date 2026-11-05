@@ -6,10 +6,10 @@
  * patch. IDs come from the caller (D-11).
  */
 
-import type { Command, NodeContentPatch } from './types';
+import type { Command, NodeContentPatch, EdgeContentPatch } from './types';
 import type { Doc } from './types';
 import type { EntityChange, Patch } from './types';
-import type { Anchor, Edge, Id, Node } from './types';
+import type { Anchor, Edge, EdgeRoute, Id, Node } from './types';
 import { deepEqual } from './deepEqual';
 import { applyPatch } from './patch';
 
@@ -25,6 +25,9 @@ const VALID_KINDS = new Set(['text', 'sticky', 'card', 'image']);
 
 /** The four valid node shapes (T-032) — same set as `validateDoc`'s. */
 const VALID_SHAPES = new Set(['rect', 'rounded', 'diamond', 'stadium']);
+
+/** The three valid edge routes (T-033) — same set as `validateDoc`'s. */
+const VALID_ROUTES = new Set<EdgeRoute>(['auto', 'straight', 'orthogonal']);
 
 /** The five valid edge anchors (D-30). Checked at runtime — commands are data. */
 const VALID_ANCHORS = new Set<Anchor>([
@@ -438,8 +441,9 @@ function compileGroupUnassign(doc: Doc, ids: Id[]): Patch {
  * Compile `edge.create`: adds the edge. Both nodes must exist, no
  * self-edge, no duplicate (from, to) pair — the reverse direction is
  * allowed — each anchor must be one of the five (checked at runtime:
- * commands are data), and an optional `label` must be a string (T-009 R2,
- * D-30). Nodes and `order` are untouched.
+ * commands are data), an optional `label` must be a string (T-009 R2,
+ * D-30), and an optional `route` must be one of the three (T-033). Nodes
+ * and `order` are untouched.
  */
 function compileEdgeCreate(doc: Doc, edge: Edge): Patch {
   if (edge.id === '') {
@@ -491,6 +495,11 @@ function compileEdgeCreate(doc: Doc, edge: Edge): Patch {
   }
   if (edge.label !== undefined && !isString(edge.label)) {
     throw new CommandError('edge.create: label is not a string');
+  }
+  if (edge.route !== undefined && !VALID_ROUTES.has(edge.route)) {
+    throw new CommandError(
+      `edge.create: route "${String(edge.route)}" is not one of 'auto' | 'straight' | 'orthogonal'`,
+    );
   }
 
   return { nodes: {}, edges: { [edge.id]: { after: edge } }, groups: {} };
@@ -703,6 +712,59 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
 }
 
 /**
+ * Compile `edge.update` (T-033, M9): apply a content patch (`route`) to
+ * every listed edge. Unknown ids throw; an invalid route throws; a patch
+ * that changes nothing (or empty ids) compiles to an empty patch — one
+ * command, one undo step, for any number of edges. Endpoints are NOT
+ * editable here: they are structural (`edge.create` / `edge.delete`).
+ */
+function compileEdgeUpdate(doc: Doc, ids: Id[], patch: EdgeContentPatch): Patch {
+  if (patch.route !== undefined && !VALID_ROUTES.has(patch.route)) {
+    throw new CommandError(
+      `edge.update: patch.route "${String(patch.route)}" is not one of 'auto' | 'straight' | 'orthogonal'`,
+    );
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.edges, id)) {
+      throw new CommandError(`edge.update: unknown id "${id}"`);
+    }
+  }
+
+  if (uniqueIds.length === 0) return emptyPatch();
+
+  const edges: Patch['edges'] = {};
+  for (const id of uniqueIds) {
+    const before = doc.edges[id]!;
+    const after: Edge = {
+      ...before,
+      ...(patch.route !== undefined ? { route: patch.route } : {}),
+    };
+    // Skip edges the patch does not actually change (D-22): an explicit
+    // 'auto' on an absent route IS a change (the stored value differs), the
+    // same semantics `node.update` has for shape (T-032).
+    if (after.route === before.route) {
+      continue;
+    }
+    edges[id] = { before, after };
+  }
+
+  if (Object.keys(edges).length === 0) return emptyPatch();
+  return { nodes: {}, edges, groups: {} };
+}
+
+/**
  * Compile `edge.delete`: removes the listed edges. Duplicates are ignored;
  * an unknown id throws; empty `ids` returns an empty patch (T-009 R2).
  * Nodes and `order` are untouched.
@@ -845,6 +907,8 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':
       return compileEdgeDelete(doc, command.ids);
+    case 'edge.update':
+      return compileEdgeUpdate(doc, command.ids, command.patch);
     case 'batch':
       return compileBatch(doc, command.commands);
     default:

@@ -266,3 +266,31 @@ describe('validateDoc — multiple violations', () => {
     expect(errs.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('validateDoc — bad-route (T-033)', () => {
+  it('accepts each of the three routes', () => {
+    for (const route of ['auto', 'straight', 'orthogonal'] as const) {
+      const doc = validDoc();
+      doc.edges.e1!.route = route;
+      expect(validateDoc(doc)).toEqual([]);
+    }
+  });
+
+  it('accepts an absent route (pre-route files stay valid)', () => {
+    expect(validateDoc(validDoc())).toEqual([]);
+  });
+
+  it('flags an unknown route', () => {
+    const doc = validDoc();
+    doc.edges.e1!.route = 'curved' as Edge['route'];
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-route:'))).toBe(true);
+  });
+
+  it('flags a non-string route', () => {
+    const doc = validDoc();
+    doc.edges.e1!.route = 7 as unknown as Edge['route'];
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-route:'))).toBe(true);
+  });
+});

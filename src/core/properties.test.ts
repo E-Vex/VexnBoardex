@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { Anchor, Command, Doc, Edge, Node, Patch } from './types';
+import type { Anchor, Command, Doc, Edge, EdgeRoute, Node, Patch } from './types';
 import { emptyDoc, validateDoc } from './doc';
 import { deepEqual } from './deepEqual';
 import { applyPatch, invertPatch } from './patch';
@@ -27,6 +27,9 @@ const RUNS = 200;
 
 const KINDS: Node['kind'][] = ['text', 'sticky', 'card', 'image'];
 const ANCHORS: Anchor[] = ['auto', 'top', 'right', 'bottom', 'left'];
+
+/** The three edge routes (T-033), for the random command generator. */
+const ROUTES: EdgeRoute[] = ['auto', 'straight', 'orthogonal'];
 // T-032: nodes usually have no shape (the classic outline); sometimes one
 // of the four, so the property runs exercise shape validation too.
 const SHAPES: (Node['shape'] | undefined)[] = [
@@ -100,7 +103,7 @@ function randomCommand(
 ): Command | null {
   const nodeIds = Object.keys(doc.nodes);
   const edgeIds = Object.keys(doc.edges);
-  const choice = randInt(rng, 0, 6);
+  const choice = randInt(rng, 0, 7);
   if (choice === 0) {
     // node.create with a fresh id
     const id = `new${counter.nextId++}`;
@@ -149,6 +152,14 @@ function randomCommand(
       w: randInt(rng, 1, 400),
       h: randInt(rng, 1, 400),
     };
+  } else if (choice === 7 && edgeIds.length > 0) {
+    // edge.update: a random route patch over a random edge subset (T-033)
+    const subset = randSubset(rng, edgeIds);
+    return {
+      type: 'edge.update',
+      ids: subset,
+      patch: { route: randPick(rng, ROUTES) },
+    };
   }
   return null;
 }
@@ -181,6 +192,7 @@ function randomEdgeCreate(
   if (candidates.length === 0) return null;
   const [from, to] = randPick(rng, candidates);
   const label = rng() < 0.5 ? `L${randInt(rng, 0, 99)}` : undefined;
+  const route = rng() < 0.5 ? randPick(rng, ROUTES) : undefined;
   return {
     type: 'edge.create',
     edge: {
@@ -188,6 +200,7 @@ function randomEdgeCreate(
       from: { node: from, anchor: randPick(rng, ANCHORS) },
       to: { node: to, anchor: randPick(rng, ANCHORS) },
       ...(label !== undefined ? { label } : {}),
+      ...(route !== undefined ? { route } : {}),
     },
   };
 }

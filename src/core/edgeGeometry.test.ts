@@ -9,8 +9,18 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { Anchor, Edge, Node } from './types';
-import { anchorPoint, edgeEndpoints, nodeRect } from './edgeGeometry';
+import type { Anchor, Edge, EdgeRoute, Node } from './types';
+import {
+  anchorPoint,
+  edgeEndpoints,
+  edgePoints,
+  elbow,
+  nodeRect,
+  orthogonalSide,
+  polylineDistance,
+  polylineMidpoint,
+  type Side,
+} from './edgeGeometry';
 import type { Point, Rect } from './geometry';
 import { mulberry32, randInt } from './prng.helper';
 
@@ -360,5 +370,281 @@ describe('edge geometry — seeded properties (200 runs × 25 anchor pairs)', ()
         }
       }
     }
+  });
+});
+
+// --- T-033: orthogonal routing ---
+
+describe('orthogonalSide — dominant-axis side selection (T-033)', () => {
+  it('picks the right side when the other node is mostly to the right', () => {
+    expect(orthogonalSide(R, { x: 500, y: 49 })).toBe('right');
+  });
+
+  it('picks the left side when the other node is mostly to the left', () => {
+    expect(orthogonalSide(R, { x: -400, y: 51 })).toBe('left');
+  });
+
+  it('picks the bottom side when the other node is mostly below', () => {
+    expect(orthogonalSide(R, { x: 61, y: 400 })).toBe('bottom');
+  });
+
+  it('picks the top side when the other node is mostly above', () => {
+    expect(orthogonalSide(R, { x: 59, y: -300 })).toBe('top');
+  });
+
+  it('an exact diagonal prefers the horizontal side (|dx| >= |dy|)', () => {
+    // Center (60, 50); toward (360, 350): dx = 300, dy = 300.
+    expect(orthogonalSide(R, { x: 360, y: 350 })).toBe('right');
+    expect(orthogonalSide(R, { x: -240, y: -250 })).toBe('left');
+  });
+
+  it('coincident centers fall back to right (D-31 fallback)', () => {
+    expect(orthogonalSide(R, { x: 60, y: 50 })).toBe('right');
+  });
+});
+
+describe('elbow — every segment is axis-aligned (T-033)', () => {
+  const P0: Point = { x: 10, y: 10 };
+  const P1: Point = { x: 400, y: 300 };
+
+  it('horizontal → horizontal is a Z through the mid-x', () => {
+    expect(elbow(P0, 'right', P1, 'left')).toEqual([
+      { x: 10, y: 10 },
+      { x: 205, y: 10 },
+      { x: 205, y: 300 },
+      { x: 400, y: 300 },
+    ]);
+  });
+
+  it('vertical → vertical is a Z through the mid-y', () => {
+    expect(elbow(P0, 'bottom', P1, 'top')).toEqual([
+      { x: 10, y: 10 },
+      { x: 10, y: 155 },
+      { x: 400, y: 155 },
+      { x: 400, y: 300 },
+    ]);
+  });
+
+  it('horizontal → vertical is an L at (to.x, from.y)', () => {
+    expect(elbow(P0, 'right', P1, 'top')).toEqual([
+      { x: 10, y: 10 },
+      { x: 400, y: 10 },
+      { x: 400, y: 300 },
+    ]);
+  });
+
+  it('vertical → horizontal is an L at (from.x, to.y)', () => {
+    expect(elbow(P0, 'bottom', P1, 'left')).toEqual([
+      { x: 10, y: 10 },
+      { x: 10, y: 300 },
+      { x: 400, y: 300 },
+    ]);
+  });
+
+  it('every one of the four side combinations is axis-aligned end to end', () => {
+    const sides: Side[] = ['top', 'right', 'bottom', 'left'];
+    for (const a of sides) {
+      for (const b of sides) {
+        const pts = elbow(P0, a, P1, b);
+        expect(pts[0]).toEqual(P0);
+        expect(pts[pts.length - 1]).toEqual(P1);
+        for (let i = 1; i < pts.length; i++) {
+          const dx = pts[i]!.x - pts[i - 1]!.x;
+          const dy = pts[i]!.y - pts[i - 1]!.y;
+          expect(dx === 0 || dy === 0).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe('edgePoints — route-aware polyline (T-033)', () => {
+  const RECTS: Record<string, Rect> = {
+    a: { x: 0, y: 0, w: 200, h: 120 },
+    b: { x: 400, y: 300, w: 200, h: 120 },
+  };
+
+  function rectOf(id: string): Rect | undefined {
+    return RECTS[id];
+  }
+
+  function e(
+    from: Anchor,
+    to: Anchor,
+    route?: EdgeRoute,
+  ): Edge {
+    return {
+      id: 'e1',
+      from: { node: 'a', anchor: from },
+      to: { node: 'b', anchor: to },
+      ...(route !== undefined ? { route } : {}),
+    };
+  }
+
+  it('an absent route is the classic two-point arrow (pixel-identical, I-08)', () => {
+    const p = edgePoints(e('auto', 'auto'), rectOf)!;
+    const q = edgeEndpoints(e('auto', 'auto'), rectOf)!;
+    expect(p).toEqual([q.from, q.to]);
+  });
+
+  it("routes 'auto' and 'straight' both draw the two-point arrow", () => {
+    for (const route of ['auto', 'straight'] as const) {
+      const p = edgePoints(e('auto', 'auto', route), rectOf)!;
+      const q = edgeEndpoints(e('auto', 'auto'), rectOf)!;
+      expect(p).toEqual([q.from, q.to]);
+    }
+  });
+
+  it('orthogonal resolves fixed anchors to their side midpoints', () => {
+    // from: fixed right on A → (200, 60); to: fixed top on B → (500, 300).
+    // Horizontal leave, vertical arrival: L with the corner at (500, 60).
+    expect(edgePoints(e('right', 'top', 'orthogonal'), rectOf)).toEqual([
+      { x: 200, y: 60 },
+      { x: 500, y: 60 },
+      { x: 500, y: 300 },
+    ]);
+  });
+
+  it('orthogonal resolves auto anchors by the dominant axis (render-time side selection)', () => {
+    // A center (100, 60), B center (500, 360): dx = 400 > dy = 300.
+    // from → 'right' (200, 60); to → 'left' (400, 360). H → H Z route.
+    expect(edgePoints(e('auto', 'auto', 'orthogonal'), rectOf)).toEqual([
+      { x: 200, y: 60 },
+      { x: 300, y: 60 },
+      { x: 300, y: 360 },
+      { x: 400, y: 360 },
+    ]);
+  });
+
+  it('a missing rect gives null', () => {
+    expect(edgePoints(e('auto', 'auto', 'orthogonal'), (id) =>
+      id === 'a' ? RECTS.a : undefined,
+    )).toBeNull();
+  });
+
+  it('does not mutate the edge or the rects', () => {
+    const frozenEdge = deepFreeze(e('auto', 'auto', 'orthogonal'));
+    const frozenRects: Record<string, Rect> = deepFreeze({
+      a: { x: 0, y: 0, w: 10, h: 10 },
+      b: { x: 50, y: 40, w: 10, h: 10 },
+    });
+    const pts = edgePoints(frozenEdge, (id) => frozenRects[id])!;
+    expect(pts.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('every orthogonal segment is axis-aligned for all 25 anchor pairs (seeded)', () => {
+    for (let run = 0; run < 25; run++) {
+      const rng = mulberry32(PROP_SEED + run);
+      const a = randomRect(rng);
+      const b = randomRect(rng);
+      const rectOf = rectsToRectOf(a, b);
+      for (const fa of ANCHORS) {
+        for (const ta of ANCHORS) {
+          const pts = edgePoints(
+            { ...mkEdge(fa, ta), route: 'orthogonal' },
+            rectOf,
+          )!;
+          expect(pts.length).toBeGreaterThanOrEqual(2);
+          for (let i = 1; i < pts.length; i++) {
+            const dx = pts[i]!.x - pts[i - 1]!.x;
+            const dy = pts[i]!.y - pts[i - 1]!.y;
+            expect(dx === 0 || dy === 0).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('orthogonal endpoints are side midpoints: on the rect boundary (seeded)', () => {
+    for (let run = 0; run < 25; run++) {
+      const rng = mulberry32(PROP_SEED + run);
+      const a = randomRect(rng);
+      const b = randomRect(rng);
+      const rectOf = rectsToRectOf(a, b);
+      for (const fa of FIXED_ANCHORS) {
+        for (const ta of FIXED_ANCHORS) {
+          const pts = edgePoints(
+            { ...mkEdge(fa, ta), route: 'orthogonal' },
+            rectOf,
+          )!;
+          expect(Math.abs(boundaryRatio(a, pts[0]!) - 1)).toBeLessThanOrEqual(1e-9);
+          expect(
+            Math.abs(boundaryRatio(b, pts[pts.length - 1]!) - 1),
+          ).toBeLessThanOrEqual(1e-9);
+        }
+      }
+    }
+  });
+});
+
+describe('polylineDistance — nearest segment wins (T-033)', () => {
+  const Z: Point[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+  ];
+
+  it('a point on a segment has distance 0', () => {
+    expect(polylineDistance(Z, { x: 40, y: 0 })).toBe(0);
+    expect(polylineDistance(Z, { x: 100, y: 60 })).toBe(0);
+  });
+
+  it('measures the perpendicular distance to the nearest segment', () => {
+    expect(polylineDistance(Z, { x: 40, y: 30 })).toBe(30);
+  });
+
+  it('clamps to segment endpoints', () => {
+    expect(polylineDistance(Z, { x: -30, y: -40 })).toBe(50);
+  });
+
+  it('the vertical segment of the Z is nearer than the horizontal one', () => {
+    // (130, 80) is 30 from the vertical segment, sqrt(30² + 80²) from the
+    // horizontal one.
+    expect(polylineDistance(Z, { x: 130, y: 80 })).toBe(30);
+  });
+
+  it('fewer than two points is unreachable (Infinity)', () => {
+    expect(polylineDistance([{ x: 0, y: 0 }], { x: 0, y: 0 })).toBe(Infinity);
+    expect(polylineDistance([], { x: 0, y: 0 })).toBe(Infinity);
+  });
+});
+
+describe('polylineMidpoint — half the arc length (T-033)', () => {
+  it('a two-point line keeps the segment midpoint (T-010 labels unchanged)', () => {
+    expect(polylineMidpoint([{ x: 0, y: 0 }, { x: 100, y: 0 }])).toEqual({
+      x: 50,
+      y: 0,
+    });
+  });
+
+  it('an even L bends at its corner', () => {
+    // Both legs are 100 long: half the arc is exactly the corner.
+    const mid = polylineMidpoint([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+    ]);
+    expect(mid).toEqual({ x: 100, y: 0 });
+  });
+
+  it('an uneven L lands on the longer leg', () => {
+    // Legs 300 and 100: half the arc (200) falls on the first leg at x=200.
+    const mid = polylineMidpoint([
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      { x: 300, y: 100 },
+    ]);
+    expect(mid).toEqual({ x: 200, y: 0 });
+  });
+
+  it('a Z lands on the vertical middle segment', () => {
+    // Segments: 100, 100, 100 — total 300, half 150 → 50 down the middle.
+    const mid = polylineMidpoint([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 200, y: 100 },
+    ]);
+    expect(mid).toEqual({ x: 100, y: 50 });
   });
 });

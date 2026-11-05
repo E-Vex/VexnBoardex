@@ -9,7 +9,8 @@
 
 import { rectContains } from './geometry';
 import type { Doc, Id, Anchor } from './types';
-import type { Point } from './geometry';
+import type { Point, Rect } from './geometry';
+import { edgePoints, nodeRect, polylineDistance } from './edgeGeometry';
 
 /** Camera shape used for coordinate conversion (matches view/camera.ts). */
 type Camera = { x: number; y: number; zoom: number };
@@ -221,4 +222,45 @@ function getHandleWorldPoint(rect: { x: number; y: number; w: number; h: number 
       // 'auto' is not a fixed handle position; fall back to center.
       return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   }
+}
+
+// ── Edge hit-testing (T-033) ────────────────────────────────────────────
+
+/**
+ * The screen-space hit radius of an edge's polyline, in CSS px (T-033):
+ * a world point within this many SCREEN pixels of the drawn route hits
+ * the edge, so the target stays comfortably clickable at any zoom.
+ */
+export const EDGE_HIT_RADIUS = 6;
+
+/**
+ * The id of the edge whose route polyline passes nearest to a world
+ * `point`, or `null` when none is within `EDGE_HIT_RADIUS` screen pixels
+ * (T-033). Route-aware: an orthogonal edge is clickable along its whole
+ * elbow, not just the straight line between its endpoints. `zoom` converts
+ * the screen-pixel threshold to world units; `rectOf` defaults to the
+ * nodes' current rects (a click happens with no drag/resize preview). Pure.
+ */
+export function edgeAt(
+  doc: Doc,
+  point: Point,
+  zoom: number,
+  rectOf: (id: Id) => Rect | undefined = (id) => {
+    const node = doc.nodes[id];
+    return node === undefined ? undefined : nodeRect(node);
+  },
+): Id | null {
+  const threshold = EDGE_HIT_RADIUS / zoom;
+  let bestId: Id | null = null;
+  let bestDist = Infinity;
+  for (const [id, edge] of Object.entries(doc.edges)) {
+    const pts = edgePoints(edge, rectOf);
+    if (pts === null) continue; // a dangling edge has no polyline to hit
+    const d = polylineDistance(pts, point);
+    if (d <= threshold && d < bestDist) {
+      bestDist = d;
+      bestId = id;
+    }
+  }
+  return bestId;
 }
