@@ -32,6 +32,7 @@ import { saveTemplate, listTemplates, deleteTemplate, type TemplateRecord } from
 import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
 import { renderDocToPng } from './view/pngExport';
 import { createNodeAt } from './input/cardCommand';
+import { planKanbanBoard } from './core/kanban';
 import { screenToWorld } from './view/camera';
 import type { NodeKind } from './core/types';
 
@@ -465,6 +466,31 @@ function createToolbar(): void {
   makeBtn({ text: '＋ Text', onClick: () => addNode('text') });
   makeBtn({ text: '＋ Sticky', onClick: () => addNode('sticky') });
   makeBtn({ text: '＋ Card', onClick: () => addNode('card') });
+
+  // M9 (T-035): a To Do / Doing / Done kanban board at the viewport centre
+  // — three `group.create`s in ONE batch, so one undo removes the whole
+  // board. With columns already present the planner places the new board to
+  // their right (boards grow sideways, like lists in Trello). Columns are
+  // data (D-14): no mode is entered, snapping simply happens wherever
+  // columns are.
+  makeBtn({
+    text: '＋ Kanban',
+    testid: 'add-kanban',
+    onClick: () => {
+      const { clientWidth, clientHeight } = host.canvas;
+      const world = screenToWorld(store.get(), {
+        x: clientWidth / 2,
+        y: clientHeight / 2,
+      });
+      docStore.dispatch(
+        planKanbanBoard(docStore.get(), world, [
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+        ]),
+      );
+    },
+  });
 
   // M7 (T-023): insert an image from a file — read as a data URL, sized to
   // the image's aspect ratio (max 400 on the long side), created at the
