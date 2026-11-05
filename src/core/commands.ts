@@ -511,7 +511,7 @@ function compileGroupDelete(doc: Doc, ids: Id[]): Patch {
   const nodes: Patch['nodes'] = {};
   for (const node of Object.values(doc.nodes)) {
     if (node.groupId !== undefined && deleteSet.has(node.groupId)) {
-      const { groupId, ...rest } = node;
+      const { groupId: _gone, ...rest } = node;
       nodes[node.id] = { before: node, after: rest };
     }
   }

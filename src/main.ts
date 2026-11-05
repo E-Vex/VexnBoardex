@@ -410,6 +410,7 @@ function createToolbar(): void {
     font-family: system-ui, sans-serif;
     flex-wrap: wrap;
     max-width: calc(100vw - 280px);
+    pointer-events: none;
   `;
 
   type ButtonConfig = {
@@ -430,7 +431,8 @@ function createToolbar(): void {
     if (config.testid !== undefined) {
       btn.dataset.testid = config.testid;
     }
-    btn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+    btn.style.cssText =
+      'padding: 6px 12px; font-size: 13px; cursor: pointer; pointer-events: auto;';
     btn.disabled = config.isDisabled ? config.isDisabled() : false;
     btn.onclick = config.onClick;
     buttons.push({ element: btn, config });
@@ -623,6 +625,7 @@ function createToolbar(): void {
     color: #e8e8ef;
     width: 130px;
     outline: none;
+    pointer-events: auto;
   `;
   toolbar.appendChild(templateNameInput);
   const saveTemplateBtn = makeBtn({
