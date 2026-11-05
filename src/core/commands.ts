@@ -7,11 +7,12 @@
  */
 
 import type { Command, NodeContentPatch, EdgeContentPatch } from './types';
-import type { Doc } from './types';
+import type { Doc, Group } from './types';
 import type { EntityChange, Patch } from './types';
 import type { Anchor, Edge, EdgeRoute, Id, Node } from './types';
 import { deepEqual } from './deepEqual';
 import { applyPatch } from './patch';
+import { groupViolations } from './doc';
 
 /** Thrown when a command cannot be compiled (PLAN D-22). */
 export class CommandError extends Error {
@@ -202,6 +203,8 @@ function compileDelete(doc: Doc, ids: Id[]): Patch {
   // Groups left with no members are deleted in the same patch (T-024:
   // I-09-style cascade — one undo restores the nodes, their edges AND the
   // group). Only groups that are actually losing members in THIS delete.
+  // T-035: a group with a LAYOUT ROLE (a kanban column) is never cascaded —
+  // an empty column is the default kanban state, not an accident.
   const groups: Patch['groups'] = {};
   for (const [groupId, group] of Object.entries(doc.groups)) {
     const hadDeletedMember = Object.values(doc.nodes).some(
@@ -211,7 +214,7 @@ function compileDelete(doc: Doc, ids: Id[]): Patch {
     const stillMember = Object.values(doc.nodes).some(
       (n) => n.groupId === groupId && !deleteSet.has(n.id),
     );
-    if (!stillMember) {
+    if (!stillMember && group.role === undefined) {
       groups[groupId] = { before: group };
     }
   }
@@ -422,15 +425,178 @@ function compileGroupUnassign(doc: Doc, ids: Id[]): Patch {
     return emptyPatch();
   }
 
-  // Delete groups that now have no members left.
+  // Delete groups that now have no members left. T-035: a group with a
+  // layout role (a kanban column) survives being emptied — only plain
+  // frames cascade (an empty column is legitimate; an invisible plain
+  // frame is an accident).
   const groups: Patch['groups'] = {};
   const removed = new Set(uniqueIds);
   for (const groupId of touchedGroups) {
     const stillMember = Object.values(doc.nodes).some(
       (n) => n.groupId === groupId && !removed.has(n.id),
     );
-    if (!stillMember) {
+    if (!stillMember && doc.groups[groupId]!.role === undefined) {
       groups[groupId] = { before: doc.groups[groupId]! };
+    }
+  }
+
+  return { nodes, edges: {}, groups };
+}
+
+/**
+ * Compile `group.create` (T-035, M9): add the group exactly as given. The
+ * data is validated with the SAME rules `validateDoc` applies
+ * (`groupViolations`) — commands are data (D-22), so a bad column throws
+ * `CommandError` instead of corrupting the document. An empty `id`, a
+ * duplicate `id` or a non-string `name` throw; a group identical to an
+ * existing one cannot happen (the duplicate check fires first).
+ */
+function compileGroupCreate(doc: Doc, group: Group): Patch {
+  if (group.id === '') {
+    throw new CommandError('group.create: id is empty');
+  }
+  if (Object.prototype.hasOwnProperty.call(doc.groups, group.id)) {
+    throw new CommandError(`group.create: group "${group.id}" already exists`);
+  }
+  if (!isString(group.name)) {
+    throw new CommandError('group.create: name is not a string');
+  }
+  const violations = groupViolations(group);
+  if (violations.length > 0) {
+    throw new CommandError(`group.create: ${violations.join('; ')}`);
+  }
+  return {
+    nodes: {},
+    edges: {},
+    groups: { [group.id]: { after: group } },
+  };
+}
+
+/**
+ * Compile `group.delete` (T-035, M9): remove the listed groups. Every
+ * member node survives, ungrouped — the `groupId` clears in the SAME patch
+ * (mirroring I-09: one undo restores the groups and every membership).
+ * Duplicates are ignored; an unknown id throws; empty `ids` is a no-op.
+ */
+function compileGroupDelete(doc: Doc, ids: Id[]): Patch {
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.groups, id)) {
+      throw new CommandError(`group.delete: unknown group "${id}"`);
+    }
+  }
+
+  // No-op: empty ids.
+  if (uniqueIds.length === 0) {
+    return emptyPatch();
+  }
+
+  const groups: Patch['groups'] = {};
+  for (const id of uniqueIds) {
+    groups[id] = { before: doc.groups[id]! };
+  }
+
+  // Members survive, ungrouped, in the same patch.
+  const deleteSet = new Set(uniqueIds);
+  const nodes: Patch['nodes'] = {};
+  for (const node of Object.values(doc.nodes)) {
+    if (node.groupId !== undefined && deleteSet.has(node.groupId)) {
+      const { groupId, ...rest } = node;
+      nodes[node.id] = { before: node, after: rest };
+    }
+  }
+
+  return { nodes, edges: {}, groups };
+}
+
+/**
+ * Compile `node.setGroup` (T-035, M9): set (`groupId`) or clear (`null`)
+ * the group of the listed nodes — the primitive for moving a card between
+ * two EXISTING groups (a kanban drop) in one command. Unknown node ids
+ * throw; a `groupId` that does not exist throws; nodes already in the
+ * target group (or already ungrouped, for `null`) are skipped; empty `ids`
+ * or a patch that changes nothing compiles to an empty patch. A REGULAR
+ * group left with no members is deleted in the same patch (the T-024
+ * cascade); a kanban column never is (it may legitimately be empty).
+ */
+function compileNodeSetGroup(doc: Doc, ids: Id[], groupId: Id | null): Patch {
+  if (groupId !== null) {
+    if (groupId === '') {
+      throw new CommandError('node.setGroup: groupId is empty');
+    }
+    if (!Object.prototype.hasOwnProperty.call(doc.groups, groupId)) {
+      throw new CommandError(
+        `node.setGroup: group "${groupId}" does not exist`,
+      );
+    }
+  }
+
+  // De-duplicate ids (first occurrence wins).
+  const seen = new Set<Id>();
+  const uniqueIds: Id[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  // Validate all ids exist — unknown ids throw even when the target equals
+  // the current group.
+  for (const id of uniqueIds) {
+    if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
+      throw new CommandError(`node.setGroup: unknown id "${id}"`);
+    }
+  }
+
+  // No-op: empty ids.
+  if (uniqueIds.length === 0) {
+    return emptyPatch();
+  }
+
+  const nodes: Patch['nodes'] = {};
+  const touchedGroups = new Set<Id>();
+  for (const id of uniqueIds) {
+    const before = doc.nodes[id]!;
+    // Already in the target group — or already free, for `null` (undefined
+    // and null mean the same thing here; comparing them directly would let
+    // a no-op through, D-22).
+    const current = before.groupId ?? null;
+    if (current === groupId) continue;
+    if (groupId === null) {
+      const { groupId: old, ...rest } = before;
+      nodes[id] = { before, after: rest };
+      touchedGroups.add(old!);
+    } else {
+      nodes[id] = { before, after: { ...before, groupId } };
+      if (before.groupId !== undefined) touchedGroups.add(before.groupId);
+    }
+  }
+
+  if (Object.keys(nodes).length === 0) {
+    return emptyPatch();
+  }
+
+  // Regular groups left with no members are deleted in the same patch
+  // (the T-024 cascade, role-aware); kanban columns survive.
+  const groups: Patch['groups'] = {};
+  const moved = new Set(uniqueIds);
+  for (const gid of touchedGroups) {
+    const stillMember = Object.values(doc.nodes).some(
+      (n) => n.groupId === gid && !moved.has(n.id),
+    );
+    if (!stillMember && doc.groups[gid]!.role === undefined) {
+      groups[gid] = { before: doc.groups[gid]! };
     }
   }
 
@@ -903,6 +1069,12 @@ export function compileCommand(doc: Doc, command: Command): Patch {
       return compileGroupAssign(doc, command.groupId, command.name, command.ids);
     case 'group.unassign':
       return compileGroupUnassign(doc, command.ids);
+    case 'group.create':
+      return compileGroupCreate(doc, command.group);
+    case 'group.delete':
+      return compileGroupDelete(doc, command.ids);
+    case 'node.setGroup':
+      return compileNodeSetGroup(doc, command.ids, command.groupId);
     case 'edge.create':
       return compileEdgeCreate(doc, command.edge);
     case 'edge.delete':
