@@ -28,6 +28,7 @@ import {
   columnHeaderHit,
   columnMembers,
   columnRect,
+  columnReorderPlan,
   columnResizeHit,
   columnResizeRect,
   columnsOf,
@@ -35,6 +36,7 @@ import {
   insertionIndex,
   isColumn,
   planColumnMove,
+  planColumnReorder,
   planColumnResize,
   planKanbanBoard,
   planKanbanCreate,
@@ -81,6 +83,31 @@ function board(
 const SLOT0 = { x: KANBAN_PADDING, y: KANBAN_HEADER_H + KANBAN_PADDING };
 /** Slot 1 top-left for a column at (0, 0) with 120-high cards. */
 const SLOT1 = { x: KANBAN_PADDING, y: SLOT0.y + 120 + KANBAN_CARD_GAP };
+
+/** A board with the SHIPPED seam: columns c1 (x 0), c2 (x 280, 'Doing'),
+ * c3 (x 560, 'Done') — 240 wide, `KANBAN_COLUMN_GAP` apart, exactly what
+ * `planKanbanBoard` plants (the reorder math is specified against it). */
+function tightBoard(
+  cards: Array<{ id: string; col?: 'c1' | 'c2' | 'c3'; y?: number }> = [],
+  widths: Partial<Record<'c1' | 'c2' | 'c3', number>> = {},
+): Doc {
+  const doc = emptyDoc();
+  const w = (id: 'c1' | 'c2' | 'c3') => widths[id] ?? 240;
+  doc.groups = {
+    c1: { ...column('c1'), w: w('c1') },
+    c2: { ...column('c2', 280, 0, 'Doing'), w: w('c2') },
+    c3: { ...column('c3', 560, 0, 'Done'), w: w('c3') },
+  };
+  for (const c of cards) {
+    // Seated at the column's inset (slot 0), like a real board.
+    const inset = c.col === 'c2' ? 296 : c.col === 'c3' ? 576 : 16;
+    const n = node(c.id, { x: inset, y: c.y ?? KANBAN_HEADER_H + KANBAN_PADDING });
+    if (c.col !== undefined) n.groupId = c.col;
+    doc.nodes[c.id] = n;
+    doc.order.push(c.id);
+  }
+  return doc;
+}
 
 describe('kanban — column helpers', () => {
   it('isColumn and columnRect', () => {
@@ -573,6 +600,109 @@ describe('planColumnResize — resize the column, re-fit the cards (T-037)', () 
   it('guards programming errors (unknown column, no inner width)', () => {
     expect(() => planColumnResize(board(), 'nope', { x: 0, y: 0, w: 240, h: 400 })).toThrow();
     expect(() => planColumnResize(board(), 'c1', { x: 0, y: 0, w: 20, h: 400 })).toThrow();
+  });
+});
+
+describe('planColumnReorder — Trello-style reflow (T-038)', () => {
+  it('columnReorderPlan: null for unknown ids, non-columns, loners and non-overlapping drags', () => {
+    const lonely = emptyDoc();
+    lonely.groups = { c1: column('c1') };
+    expect(columnReorderPlan(lonely, 'c1', 500, 0)).toBeNull(); // no other column
+    expect(columnReorderPlan(tightBoard(), 'nope', 500, 0)).toBeNull();
+    const framed = tightBoard();
+    framed.groups = { ...framed.groups, g: { id: 'g', name: 'frame' } };
+    expect(columnReorderPlan(framed, 'g', 500, 0)).toBeNull(); // not a column
+    expect(columnReorderPlan(tightBoard(), 'c1', 30, 0)).toBeNull(); // no reach
+    expect(columnReorderPlan(tightBoard(), 'c1', 0, 1000)).toBeNull(); // vertical exit
+  });
+
+  it('columnReorderPlan: dragging c1 past c2\'s centre swaps their slots — c3 keeps its x', () => {
+    // c1 preview [300, 540], centre 420 > c2\'s centre 400 → lands AFTER c2.
+    expect(columnReorderPlan(tightBoard(), 'c1', 300, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('columnReorderPlan: dragging c3 past c2\'s centre lands it in the middle; c2 slides right', () => {
+    // c3 preview [260, 500], centre 380 < c2\'s centre 400 → lands BEFORE c2.
+    expect(columnReorderPlan(tightBoard(), 'c3', -300, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: 280 }],
+    });
+  });
+
+  it('columnReorderPlan: an overlap that crosses no centre seats the column back home', () => {
+    // c1 preview [100, 340] pushes into c2 [280, 520], but the centre
+    // (220) stays left of c2\'s (400): the order — and a compact board —
+    // changes nothing.
+    expect(columnReorderPlan(tightBoard(), 'c1', 100, 0)).toEqual({
+      x: 0,
+      shifts: [],
+    });
+  });
+
+  it('columnReorderPlan: a centre exactly equal lands right of it (the card rule)', () => {
+    // dx 280 puts c1\'s centre exactly on c2\'s (400): `<=` counts c2,
+    // so c1 lands AFTER it.
+    expect(columnReorderPlan(tightBoard(), 'c1', 280, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('columnReorderPlan: variable widths reflow with their own seams', () => {
+    // c2 widened to 320 (x 280–600), c3 pushed to 640: seams stay 40.
+    const doc = tightBoard([], { c2: 320, c3: 240 });
+    doc.groups.c3 = { ...doc.groups.c3!, x: 640 };
+    // c1 centre 120 + 330 = 450 > c2\'s centre 440 → after c2.
+    expect(columnReorderPlan(doc, 'c1', 330, 0)).toEqual({
+      x: 360, // c2 (320 wide) at 0 + 320 + 40
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('planColumnReorder: ONE batch — the column snaps, its cards follow, the parted column slides with its cards', () => {
+    const doc = tightBoard([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c2' },
+    ]);
+    const plan = planColumnReorder(doc, 'c1', 300, 0);
+    expect(plan).not.toBeNull();
+    const next = applyPatch(doc, compileCommand(doc, plan!));
+    // c1 sealed into c2\'s slot; its card seated at the inset.
+    expect(next.groups.c1).toMatchObject({ x: 280, y: 0, w: 240, h: 400 });
+    expect(next.nodes.a).toMatchObject({ x: 296, y: SLOT0.y });
+    // c2 slid into c1\'s slot; its card seated at the inset.
+    expect(next.groups.c2).toMatchObject({ x: 0, y: 0, w: 240, h: 400 });
+    expect(next.nodes.b).toMatchObject({ x: 16, y: SLOT0.y });
+    // c3 untouched.
+    expect(next.groups.c3).toMatchObject({ x: 560 });
+    expect(validateDoc(next)).toEqual([]);
+    // ONE undo restores the whole reflow.
+    const undone = applyPatch(next, invertPatch(compileCommand(doc, plan!)));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('planColumnReorder: a seated-home drag with no vertical drift is the empty batch (a pure no-op)', () => {
+    const doc = tightBoard([{ id: 'a', col: 'c1' }]);
+    const plan = planColumnReorder(doc, 'c1', 100, 0);
+    expect(plan).toEqual({ type: 'batch', commands: [] });
+    expect(isEmptyPatch(compileCommand(doc, plan!))).toBe(true);
+  });
+
+  it('planColumnReorder: the row governs x only — a seated-home drag keeps its raw vertical drift', () => {
+    const doc = tightBoard([{ id: 'a', col: 'c1' }]);
+    const plan = planColumnReorder(doc, 'c1', 100, 50);
+    const next = applyPatch(doc, compileCommand(doc, plan!));
+    expect(next.groups.c1).toMatchObject({ x: 0, y: 50 });
+    expect(next.nodes.a).toMatchObject({ x: 16, y: SLOT0.y + 50 });
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('planColumnReorder: null when the drag stays free — the caller falls back to planColumnMove', () => {
+    expect(planColumnReorder(tightBoard(), 'c1', 30, 0)).toBeNull();
+    expect(planColumnReorder(tightBoard(), 'c1', 0, 500)).toBeNull();
   });
 });
 
