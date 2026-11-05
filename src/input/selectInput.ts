@@ -10,6 +10,16 @@
  * - `selectInRect` → resolves the marquee rect against the document and
  *   sets the selection (T-017)
  *
+ * T-035 (Kanban, data-driven — no mode): the glue rewrites DRAG effects
+ * through the pure kanban planner. A single-card drag previews glued to its
+ * slot while the card is over a column; the drag's pointer-up commit — a
+ * `node.move` emitted by the machine, distinguishable from arrow-key nudges
+ * by the pre-reduce mode — becomes the planner's ONE batch command (moves +
+ * membership + source gap-closing) so a drop is ONE undo step (I-04). A
+ * kanban card drags ALONE (`dragMembersOf`: the column is a container, not
+ * a move-together unit), and a press on a column's × close affordance arms
+ * a `group.delete` committed on release (D-26-style).
+ *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
  * a pan owns the pointer (`isPanActive`: Space held or actively panning —
@@ -25,10 +35,10 @@
 import {
   hitTestWithHandles,
   hitTestResizeHandles,
-  groupMembersOf,
   groupFrameAt,
   edgeAt,
 } from '../core/hitTest';
+import { columnCloseHit, dragMembersOf, planKanbanDrop } from '../core/kanban';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
@@ -37,6 +47,7 @@ import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
 import { isEditableTarget } from './keys';
 import { pointerToCanvasPos } from './cursor';
+import { DRAG_THRESHOLD } from './selectTool';
 import {
   type SelectCtx,
   type SelectEffect,
@@ -68,9 +79,31 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   let state: SelectState = initialSelectState();
   let capturedPointerId: number | null = null;
+  /** An armed × close press (T-035): the column deletes on RELEASE — cancel
+   * paths (cancel, blur, a drag past the threshold) dispatch nothing,
+   * exactly like every other gesture (D-26). */
+  let pendingClose: {
+    pointerId: number;
+    columnId: Id;
+    screen: { x: number; y: number };
+  } | null = null;
 
-  /** Apply the machine's effects to the UI and doc stores (R6). */
-  function applyEffects(effects: SelectEffect[]): void {
+  /** What a drag looked like BEFORE the reduce: at pointer-up the machine
+   * resets to idle, so the pressed node (the kanban drop's primary card)
+   * must be captured here (T-035). */
+  interface DragCtx {
+    /** The machine was mid-drag (the commit case for the dispatch rewrite). */
+    dragging: boolean;
+    /** The machine was pressed or dragging — both can carry a setDrag
+     * preview (the pressed→dragging transition emits the first one). */
+    previewing: boolean;
+    /** The pressed node, when a node was pressed. */
+    primaryId: Id | null;
+  }
+
+  /** Apply the machine's effects to the UI and doc stores (R6), rewriting
+   * drag effects through the kanban planner (T-035). */
+  function applyEffects(effects: SelectEffect[], drag: DragCtx): void {
     for (const effect of effects) {
       switch (effect.type) {
         case 'select':
@@ -79,12 +112,45 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
         case 'selectEdge':
           uiStore.setEdgeSelection(effect.ids);
           break;
-        case 'setDrag':
-          uiStore.setDrag(effect.drag);
+        case 'setDrag': {
+          let d = effect.drag;
+          if (d !== null && drag.previewing && d.ids.length === 1) {
+            // Kanban (T-035): a single-card drag previews glued to its slot
+            // while the card is over a column. Pure math over the current
+            // document — the document itself is untouched (I-04).
+            const plan = planKanbanDrop(docStore.get(), {
+              ids: d.ids,
+              dx: d.dx,
+              dy: d.dy,
+              primaryId: drag.primaryId,
+            });
+            if (plan.preview !== null) {
+              d = { ids: d.ids, dx: plan.preview.dx, dy: plan.preview.dy };
+            }
+          }
+          uiStore.setDrag(d);
           break;
-        case 'dispatch':
-          docStore.dispatch(effect.command);
+        }
+        case 'dispatch': {
+          let command = effect.command;
+          if (
+            drag.dragging &&
+            command.type === 'node.move' &&
+            command.ids.length > 0
+          ) {
+            // Kanban (T-035): the drag commit. Only a DRAG commit is
+            // rewritten — arrow-key nudges dispatch node.move with the
+            // machine idle, and they keep their raw deltas.
+            command = planKanbanDrop(docStore.get(), {
+              ids: command.ids,
+              dx: command.dx,
+              dy: command.dy,
+              primaryId: drag.primaryId,
+            }).command;
+          }
+          docStore.dispatch(command);
           break;
+        }
         case 'setBoxSelect':
           uiStore.setBoxSelect(effect.rect);
           break;
@@ -165,11 +231,18 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     return { selection: ui.selection, edgeSelection: ui.edgeSelection };
   }
 
-  /** Feed one event, apply its effects, sync capture. */
+  /** Feed one event, apply its effects, sync capture. The drag context is
+   * captured BEFORE the reduce (pointer-up resets the machine to idle). */
   function feed(event: SelectEvent): void {
+    const mode = state.mode;
+    const drag: DragCtx = {
+      dragging: mode === 'dragging',
+      previewing: mode === 'dragging' || mode === 'pressed',
+      primaryId: state.hitId,
+    };
     const result = reduce(state, event, currentCtx());
     state = result.state;
-    applyEffects(result.effects);
+    applyEffects(result.effects, drag);
     syncPointerCapture();
   }
 
@@ -208,6 +281,14 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           rect: { x: node.x, y: node.y, w: node.w, h: node.h },
         },
       });
+      return;
+    }
+    // T-035: a press on a column's × close affordance arms a column delete
+    // (group.delete — the cards survive, ungrouped). Committed on release,
+    // like every gesture (D-26); cancel paths disarm silently.
+    const closeHit = columnCloseHit(docStore.get(), world, cameraStore.get().zoom);
+    if (closeHit !== null) {
+      pendingClose = { pointerId: e.pointerId, columnId: closeHit, screen };
       return;
     }
     // A press on a connection handle of a selected node belongs to the
@@ -249,7 +330,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       hitId,
       shiftKey: e.shiftKey,
       resize: null,
-      groupIds: hitId !== null ? groupMembersOf(docStore.get(), hitId) : [],
+      // T-035: a kanban card drags ALONE — the column is a container, not a
+      // move-together unit; regular groups keep the T-024 behaviour.
+      groupIds: hitId !== null ? dragMembersOf(docStore.get(), hitId) : [],
       hitEdgeId,
     });
   }
@@ -263,6 +346,22 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerUp(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    // T-035: release of an armed × close press — delete the column when the
+    // pointer stayed put (a click, D-26); any drag past the threshold
+    // disarms silently. Another pointer's release flows on to the machine.
+    if (pendingClose !== null && e.pointerId === pendingClose.pointerId) {
+      const { screen } = positions(e);
+      if (
+        Math.hypot(
+          screen.x - pendingClose.screen.x,
+          screen.y - pendingClose.screen.y,
+        ) < DRAG_THRESHOLD
+      ) {
+        docStore.dispatch({ type: 'group.delete', ids: [pendingClose.columnId] });
+      }
+      pendingClose = null;
+      return;
+    }
     if (state.mode === 'idle') return; // nobody is pressed on a node
     const { screen, world } = positions(e);
     feed({ type: 'pointerUp', pointerId: e.pointerId, screen, world });
@@ -270,6 +369,10 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerCancel(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    if (pendingClose !== null && e.pointerId === pendingClose.pointerId) {
+      pendingClose = null;
+      return;
+    }
     feed({ type: 'pointerCancel', pointerId: e.pointerId });
   }
 
@@ -301,6 +404,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
   }
 
   function onBlur(): void {
+    pendingClose = null;
     feed({ type: 'blur' });
   }
 
@@ -328,6 +432,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
         capturedPointerId = null;
       }
       state = initialSelectState();
+      pendingClose = null;
     },
   };
 }

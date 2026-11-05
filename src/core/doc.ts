@@ -5,7 +5,7 @@
  * without affecting other documents.
  */
 
-import type { Doc, Id, NodeShape, EdgeRoute } from './types';
+import type { Doc, Group, Id, NodeShape, EdgeRoute, GroupRole } from './types';
 
 /** A fresh `{ nodes: {}, edges: {}, groups: {}, order: [] }` each call. */
 export function emptyDoc(): Doc {
@@ -32,6 +32,62 @@ export const VALID_ROUTES: ReadonlySet<EdgeRoute> = new Set([
   'orthogonal',
 ]);
 
+/** The valid group layout roles (T-035). */
+export const VALID_GROUP_ROLES: ReadonlySet<GroupRole> = new Set(['kanban']);
+
+/**
+ * The violations of ONE group's data (T-035, D-24-style central definition,
+ * shared with `group.create`'s strict validation, D-22):
+ * - `bad-group-role:` — a `role` that is present but not `'kanban'`.
+ * - `bad-group-geometry:` — a kanban column without finite x/y/w/h
+ *   (w > 0, h > 0), or geometry fields on a group with NO role (a plain
+ *   frame derives its rect from its members — stored geometry would be a
+ *   lie, T-024).
+ *
+ * Pure: returns [] when the group's shape is valid.
+ */
+export function groupViolations(group: Group, key = group.id): string[] {
+  const errors: string[] = [];
+  if (group.role !== undefined && !VALID_GROUP_ROLES.has(group.role)) {
+    errors.push(
+      `bad-group-role: group "${key}" has invalid role ${JSON.stringify(group.role)}`,
+    );
+    return errors; // geometry rules assume a known role
+  }
+  const hasGeometry =
+    group.x !== undefined ||
+    group.y !== undefined ||
+    group.w !== undefined ||
+    group.h !== undefined;
+  if (group.role === undefined) {
+    if (hasGeometry) {
+      errors.push(
+        `bad-group-geometry: group "${key}" has geometry but no role`,
+      );
+    }
+    return errors;
+  }
+  // role === 'kanban': finite geometry, w > 0, h > 0, all four present.
+  const { x, y, w, h } = group;
+  if (
+    x === undefined ||
+    y === undefined ||
+    w === undefined ||
+    h === undefined ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(w) ||
+    !Number.isFinite(h) ||
+    w <= 0 ||
+    h <= 0
+  ) {
+    errors.push(
+      `bad-group-geometry: kanban column "${key}" needs finite x/y/w/h with w > 0 and h > 0`,
+    );
+  }
+  return errors;
+}
+
 /**
  * `validateDoc` — returns a list of violation messages, empty when the
  * document is valid (T-006 R3, PLAN D-24). Pure: never mutates.
@@ -50,6 +106,8 @@ export const VALID_ROUTES: ReadonlySet<EdgeRoute> = new Set([
  *   shapes (T-032).
  * - `bad-route:` — an edge `route` that is present but not one of the three
  *   edge routes (T-033).
+ * - `bad-group-role:` / `bad-group-geometry:` — a group whose layout role or
+ *   column geometry is invalid (T-035; see `groupViolations`).
  */
 export function validateDoc(doc: Doc): string[] {
   const errors: string[] = [];
@@ -173,6 +231,12 @@ export function validateDoc(doc: Doc): string[] {
         `bad-route: edge "${id}" has invalid route ${JSON.stringify(edge.route)}`,
       );
     }
+  }
+
+  // Group layout roles and column geometry (T-035). Absent role and
+  // geometry — every pre-kanban group — never fails here.
+  for (const [id, group] of Object.entries(doc.groups)) {
+    errors.push(...groupViolations(group, id));
   }
 
   return errors;

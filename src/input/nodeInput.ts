@@ -11,12 +11,19 @@
  * opens the text editor on that node (M7 in-place editing). The "may I
  * create a card here?" decision itself is pure (`shouldCreateCardAt` in
  * cardCommand.ts, unit-tested there).
+ *
+ * T-035 (Kanban): when the double-click lands inside a kanban column, the
+ * card is created already SEATED in its slot with membership set — one
+ * batch (create + setGroup), one undo step — through the pure planner
+ * `planKanbanCreate`. Outside every column the ordinary centred creation
+ * stands (D-28, unchanged).
  */
 
 import type { Point } from '../core/geometry';
 import type { DocStore } from '../core/store';
 import type { Id } from '../core/types';
 import { hitTest } from '../core/hitTest';
+import { planKanbanCreate } from '../core/kanban';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
@@ -73,7 +80,10 @@ export function attachNodeInput(opts: NodeInputOptions): NodeInput {
       return;
     }
     const id = newId();
-    docStore.dispatch(createCardAt(world, id));
+    // T-035: inside a column the card is born seated in its slot, with
+    // membership — one batch, one undo step; outside, the centred creation.
+    const kanbanCommand = planKanbanCreate(docStore.get(), world, id);
+    docStore.dispatch(kanbanCommand ?? createCardAt(world, id));
     // D-28: the new card is selected and the editor opens on it (T-020).
     uiStore.setSelection([id]);
     editNode?.(id);

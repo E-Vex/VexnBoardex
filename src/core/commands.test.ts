@@ -1480,3 +1480,293 @@ describe('group frame geometry (T-024)', () => {
     expect(groupFrameAt(doc, { x: 500, y: 500 })).toBeNull();
   });
 });
+
+describe('group.create — kanban columns (T-035, M9)', () => {
+  const column = (id: string, name = 'To Do') => ({
+    id,
+    name,
+    role: 'kanban' as const,
+    x: 0,
+    y: 0,
+    w: 240,
+    h: 400,
+  });
+
+  it('adds the column exactly as given', () => {
+    const doc = docWith(node('n1'));
+    const c1 = column('c1');
+    const patch = compileCommand(doc, { type: 'group.create', group: c1 });
+    expect(patch.groups.c1).toEqual({ after: c1 });
+    expect(patch.nodes).toEqual({});
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).toEqual(c1);
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('rejects an empty id, a duplicate id and a non-string name', () => {
+    expect(() =>
+      compileCommand(docWith(), { type: 'group.create', group: column('') }),
+    ).toThrow(CommandError);
+    const doc = docWith();
+    doc.groups = { c1: column('c1') };
+    expect(() =>
+      compileCommand(doc, { type: 'group.create', group: column('c1') }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(doc, {
+        type: 'group.create',
+        group: { ...column('c2'), name: 7 as unknown as string },
+      }),
+    ).toThrow(CommandError);
+  });
+
+  it('rejects invalid roles and geometry with the validateDoc rules (D-22)', () => {
+    // Unknown role.
+    expect(() =>
+      compileCommand(docWith(), {
+        type: 'group.create',
+        group: { ...column('c1'), role: 'swimlane' as never },
+      }),
+    ).toThrow(/bad-group-role/);
+    // Column without geometry.
+    expect(() =>
+      compileCommand(docWith(), {
+        type: 'group.create',
+        group: { id: 'c1', name: 'To Do', role: 'kanban' },
+      }),
+    ).toThrow(/bad-group-geometry/);
+    // Column with non-finite geometry.
+    expect(() =>
+      compileCommand(docWith(), {
+        type: 'group.create',
+        group: { ...column('c1'), x: NaN },
+      }),
+    ).toThrow(/bad-group-geometry/);
+    // Geometry without a role (a plain frame derives its rect).
+    expect(() =>
+      compileCommand(docWith(), {
+        type: 'group.create',
+        group: { id: 'c1', name: 'g', x: 0, y: 0, w: 10, h: 10 },
+      }),
+    ).toThrow(/bad-group-geometry/);
+  });
+
+  it('do → undo gives the exact original document', () => {
+    const doc = docWith(node('n1'));
+    const frozen = deepFreeze(structuredClone(doc));
+    const patch = compileCommand(doc, { type: 'group.create', group: column('c1') });
+    const next = applyPatch(doc, patch);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, frozen)).toBe(true);
+  });
+});
+
+describe('group.delete — remove columns, members survive (T-035, M9)', () => {
+  function board(): Doc {
+    const doc = docWith(
+      node('a', { x: 0, y: 0, w: 200, h: 120 }),
+      node('b', { x: 0, y: 132, w: 200, h: 120 }),
+    );
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: -16, y: -16, w: 240, h: 400 },
+      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: -16, w: 240, h: 400 },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    doc.nodes['b']!.groupId = 'c1';
+    return doc;
+  }
+
+  it('removes the groups and unassigns every member in the SAME patch', () => {
+    const doc = board();
+    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c1', 'c2'] });
+    expect(patch.groups.c1).toEqual({ before: doc.groups.c1 });
+    expect(patch.groups.c2).toEqual({ before: doc.groups.c2 });
+    expect(patch.nodes.a).toBeDefined();
+    expect(patch.nodes.a!.after).not.toHaveProperty('groupId');
+    expect(patch.nodes.b!.after).not.toHaveProperty('groupId');
+    const next = applyPatch(doc, patch);
+    expect(next.nodes.a).toBeDefined(); // cards survive
+    expect(next.nodes.a!.groupId).toBeUndefined();
+    expect(next.nodes.b!.groupId).toBeUndefined();
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('an empty column deletes alone (no members, no node changes)', () => {
+    const doc = board();
+    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c2'] });
+    expect(patch.groups.c2).toEqual({ before: doc.groups.c2 });
+    expect(patch.nodes).toEqual({});
+  });
+
+  it('empty ids → empty patch; unknown id throws', () => {
+    expect(isEmptyPatch(compileCommand(board(), { type: 'group.delete', ids: [] }))).toBe(true);
+    expect(() =>
+      compileCommand(board(), { type: 'group.delete', ids: ['nope'] }),
+    ).toThrow(CommandError);
+  });
+
+  it('duplicates are ignored', () => {
+    const doc = board();
+    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c1', 'c1'] });
+    expect(Object.keys(patch.groups)).toEqual(['c1']);
+  });
+
+  it('do → undo restores the groups AND every membership', () => {
+    const doc = deepFreeze(structuredClone(board()));
+    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c1'] });
+    const next = applyPatch(doc, patch);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+});
+
+describe('node.setGroup — membership primitive (T-035, M9)', () => {
+  function board(): Doc {
+    const doc = docWith(node('a'), node('b'), node('c'));
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: 0, w: 240, h: 400 },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    doc.nodes['b']!.groupId = 'c1';
+    return doc;
+  }
+
+  it('moves a node between two existing groups', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['a'],
+      groupId: 'c2',
+    });
+    expect(patch.nodes.a).toEqual({
+      before: doc.nodes.a,
+      after: { ...doc.nodes.a, groupId: 'c2' },
+    });
+    // The source column is NOT cascaded (a kanban column may be empty — and
+    // it is not even empty here: b stays).
+    expect(patch.groups).toEqual({});
+  });
+
+  it('clears membership with null', () => {
+    const doc = board();
+    const patch = compileCommand(doc, { type: 'node.setGroup', ids: ['a'], groupId: null });
+    expect(patch.nodes.a!.after).not.toHaveProperty('groupId');
+  });
+
+  it('clearing an already-free node is an empty patch (undefined ≡ null)', () => {
+    const doc = board(); // c is free
+    const patch = compileCommand(doc, { type: 'node.setGroup', ids: ['c'], groupId: null });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('setting the group a node already has is an empty patch', () => {
+    const patch = compileCommand(board(), {
+      type: 'node.setGroup',
+      ids: ['a'],
+      groupId: 'c1',
+    });
+    expect(isEmptyPatch(patch)).toBe(true);
+  });
+
+  it('empty ids → empty patch; unknown ids and groups throw', () => {
+    expect(
+      isEmptyPatch(compileCommand(board(), { type: 'node.setGroup', ids: [], groupId: 'c1' })),
+    ).toBe(true);
+    expect(() =>
+      compileCommand(board(), { type: 'node.setGroup', ids: ['nope'], groupId: 'c1' }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(board(), { type: 'node.setGroup', ids: ['a'], groupId: 'nope' }),
+    ).toThrow(CommandError);
+    expect(() =>
+      compileCommand(board(), { type: 'node.setGroup', ids: ['a'], groupId: '' }),
+    ).toThrow(CommandError);
+  });
+
+  it('a REGULAR group emptied by the move cascades in the same patch', () => {
+    const doc = docWith(node('a'), node('b'));
+    doc.groups = { g1: { id: 'g1', name: 'frame' } };
+    doc.nodes['a']!.groupId = 'g1';
+    doc.nodes['b']!.groupId = 'g1';
+    // b moves out; a stays → no cascade.
+    let patch = compileCommand(doc, { type: 'node.setGroup', ids: ['b'], groupId: null });
+    expect(patch.groups).toEqual({});
+    // Both move out → the plain frame goes in the same patch.
+    patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['a', 'b'],
+      groupId: null,
+    });
+    expect(patch.groups.g1).toEqual({ before: doc.groups.g1 });
+  });
+
+  it('a kanban column emptied by the move survives', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['a', 'b'],
+      groupId: 'c2',
+    });
+    expect(patch.groups).toEqual({}); // c1 emptied but not deleted
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).toBeDefined();
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('do → undo gives the exact original document', () => {
+    const doc = deepFreeze(structuredClone(board()));
+    const patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['a', 'b'],
+      groupId: 'c2',
+    });
+    const next = applyPatch(doc, patch);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+});
+
+describe('empty-group cascade is role-aware (T-035, M9)', () => {
+  function columnDoc(): Doc {
+    const doc = docWith(node('a', { x: 16, y: 52, w: 200, h: 120 }));
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    return doc;
+  }
+
+  it('node.delete: deleting the last card leaves the column', () => {
+    const doc = columnDoc();
+    const patch = compileCommand(doc, { type: 'node.delete', ids: ['a'] });
+    expect(patch.nodes.a).toEqual({ before: doc.nodes.a });
+    expect(patch.groups).toEqual({}); // the column survives
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).toEqual(doc.groups.c1);
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('node.delete: a regular group still cascades (T-024 unchanged)', () => {
+    const doc = docWith(node('a'));
+    doc.groups = { g1: { id: 'g1', name: 'frame' } };
+    doc.nodes['a']!.groupId = 'g1';
+    const patch = compileCommand(doc, { type: 'node.delete', ids: ['a'] });
+    expect(patch.groups.g1).toEqual({ before: doc.groups.g1 });
+  });
+
+  it('group.unassign: unassigning the last member leaves the column', () => {
+    const doc = columnDoc();
+    const patch = compileCommand(doc, { type: 'group.unassign', ids: ['a'] });
+    expect(patch.nodes.a!.after).not.toHaveProperty('groupId');
+    expect(patch.groups).toEqual({}); // the column survives
+  });
+
+  it('group.unassign: a regular group still cascades (T-024 unchanged)', () => {
+    const doc = docWith(node('a'));
+    doc.groups = { g1: { id: 'g1', name: 'frame' } };
+    doc.nodes['a']!.groupId = 'g1';
+    const patch = compileCommand(doc, { type: 'group.unassign', ids: ['a'] });
+    expect(patch.groups.g1).toEqual({ before: doc.groups.g1 });
+  });
+});

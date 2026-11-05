@@ -32,6 +32,7 @@ import { saveTemplate, listTemplates, deleteTemplate, type TemplateRecord } from
 import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
 import { renderDocToPng } from './view/pngExport';
 import { createNodeAt } from './input/cardCommand';
+import { planKanbanBoard } from './core/kanban';
 import { screenToWorld } from './view/camera';
 import type { NodeKind } from './core/types';
 
@@ -409,6 +410,7 @@ function createToolbar(): void {
     font-family: system-ui, sans-serif;
     flex-wrap: wrap;
     max-width: calc(100vw - 280px);
+    pointer-events: none;
   `;
 
   type ButtonConfig = {
@@ -429,7 +431,8 @@ function createToolbar(): void {
     if (config.testid !== undefined) {
       btn.dataset.testid = config.testid;
     }
-    btn.style.cssText = 'padding: 6px 12px; font-size: 13px; cursor: pointer;';
+    btn.style.cssText =
+      'padding: 6px 12px; font-size: 13px; cursor: pointer; pointer-events: auto;';
     btn.disabled = config.isDisabled ? config.isDisabled() : false;
     btn.onclick = config.onClick;
     buttons.push({ element: btn, config });
@@ -465,6 +468,31 @@ function createToolbar(): void {
   makeBtn({ text: '＋ Text', onClick: () => addNode('text') });
   makeBtn({ text: '＋ Sticky', onClick: () => addNode('sticky') });
   makeBtn({ text: '＋ Card', onClick: () => addNode('card') });
+
+  // M9 (T-035): a To Do / Doing / Done kanban board at the viewport centre
+  // — three `group.create`s in ONE batch, so one undo removes the whole
+  // board. With columns already present the planner places the new board to
+  // their right (boards grow sideways, like lists in Trello). Columns are
+  // data (D-14): no mode is entered, snapping simply happens wherever
+  // columns are.
+  makeBtn({
+    text: '＋ Kanban',
+    testid: 'add-kanban',
+    onClick: () => {
+      const { clientWidth, clientHeight } = host.canvas;
+      const world = screenToWorld(store.get(), {
+        x: clientWidth / 2,
+        y: clientHeight / 2,
+      });
+      docStore.dispatch(
+        planKanbanBoard(docStore.get(), world, [
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+        ]),
+      );
+    },
+  });
 
   // M7 (T-023): insert an image from a file — read as a data URL, sized to
   // the image's aspect ratio (max 400 on the long side), created at the
@@ -597,6 +625,7 @@ function createToolbar(): void {
     color: #e8e8ef;
     width: 130px;
     outline: none;
+    pointer-events: auto;
   `;
   toolbar.appendChild(templateNameInput);
   const saveTemplateBtn = makeBtn({
@@ -612,8 +641,15 @@ function createToolbar(): void {
       ) as FileEnvelope;
       void saveTemplate(name, envelope)
         .then(() => {
-          templateNameInput.value = '';
-          saveTemplateBtn.disabled = true;
+          // The IndexedDB write is async — the user may have started typing
+          // the NEXT name while it was in flight (observed in CI: the late
+          // .then cleared the fresh name and re-disabled the button, hanging
+          // the second save in templates.spec test 4). Only reset the field
+          // when it still holds the name this save consumed.
+          if (templateNameInput.value.trim() === name) {
+            templateNameInput.value = '';
+            saveTemplateBtn.disabled = true;
+          }
           void templateList.refresh();
           templateList.open();
         })

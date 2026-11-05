@@ -24,6 +24,13 @@ import { rectContains, rectsIntersect, type Point } from '../core/geometry';
 import { edgePoints, anchorPoint, polylineMidpoint } from '../core/edgeGeometry';
 import { groupFrameRect } from '../core/hitTest';
 import {
+  columnClosePoint,
+  columnRect,
+  isColumn,
+  KANBAN_HEADER_H,
+  KANBAN_PADDING,
+} from '../core/kanban';
+import {
   type Camera,
   cameraToMatrix,
   visibleWorldRect,
@@ -68,6 +75,10 @@ import {
   RESIZE_HANDLE_BORDER_WIDTH,
   RESIZE_HANDLE_COLOR,
   RESIZE_HANDLE_BORDER_COLOR,
+  KANBAN_COLUMN_FILL,
+  KANBAN_COLUMN_BORDER,
+  KANBAN_HEADER_COLOR,
+  KANBAN_CLOSE_COLOR,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -505,6 +516,62 @@ function drawResizeHandles(
   }
 }
 
+// ── Kanban columns (T-035) ────────────────────────────────────────────────
+
+/**
+ * Draw one kanban column panel in world coordinates (T-035, M9): the
+ * group's STORED rect (fixed geometry, not a member bbox) as a solid,
+ * softly-filled panel with a header strip (name + divider) and a × close
+ * affordance at `columnClosePoint` — the exact point the input layer
+ * hit-tests (`columnCloseHit`), so the glyph and its target can never
+ * drift apart. The × paints at a constant SCREEN size (/scale, the handle
+ * precedent, T-018) so it stays clickable-looking at any zoom.
+ */
+function drawKanbanColumn(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; w: number; h: number },
+  name: string,
+  scale: number,
+): void {
+  // The panel.
+  ctx.beginPath();
+  roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
+  ctx.fillStyle = KANBAN_COLUMN_FILL;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = KANBAN_COLUMN_BORDER;
+  ctx.stroke();
+
+  // The header divider.
+  const headerY = rect.y + KANBAN_HEADER_H;
+  ctx.beginPath();
+  ctx.moveTo(rect.x, headerY);
+  ctx.lineTo(rect.x + rect.w, headerY);
+  ctx.stroke();
+
+  // The column name, vertically centred in the header (the same text LOD
+  // the group frames use).
+  if (FONT_SIZE * scale >= MIN_TEXT_SIZE) {
+    ctx.font = `600 15px ${FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = KANBAN_HEADER_COLOR;
+    ctx.fillText(name, rect.x + KANBAN_PADDING, rect.y + KANBAN_HEADER_H / 2);
+  }
+
+  // The × close affordance (screen-constant size).
+  const cp = columnClosePoint(rect);
+  const half = 4 / scale;
+  ctx.beginPath();
+  ctx.moveTo(cp.x - half, cp.y - half);
+  ctx.lineTo(cp.x + half, cp.y + half);
+  ctx.moveTo(cp.x + half, cp.y - half);
+  ctx.lineTo(cp.x - half, cp.y + half);
+  ctx.lineWidth = 2 / scale;
+  ctx.strokeStyle = KANBAN_CLOSE_COLOR;
+  ctx.stroke();
+}
+
 // ── Connection preview drawing (T-011) ──────────────────────────────────────
 
 /**
@@ -623,11 +690,18 @@ export function renderBoard(
   // group's members, beneath the edges and nodes (PLAN T-024: "frames
   // render beneath edges"). Own save/transform: never nested inside
   // another world transform (a nested transform would apply the camera
-  // twice).
+  // twice). T-035: a KANBAN COLUMN paints its own panel instead — fixed
+  // geometry, header, × — through the same pass, so columns also sit
+  // beneath edges and cards.
   const m = cameraToMatrix(camera);
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const [groupId, group] of Object.entries(doc.groups)) {
+    if (isColumn(group)) {
+      const rect = columnRect(group);
+      if (rect !== null) drawKanbanColumn(ctx, rect, group.name, m.scale);
+      continue;
+    }
     const rect = groupFrameRect(doc, groupId);
     if (rect === null) continue;
     // A very subtle amber wash + a thin amber border, in world units (the

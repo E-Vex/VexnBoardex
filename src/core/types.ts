@@ -31,6 +31,14 @@ export type Anchor = 'auto' | 'top' | 'right' | 'bottom' | 'left';
  */
 export type EdgeRoute = 'auto' | 'straight' | 'orthogonal';
 
+/**
+ * The layout role of a group (T-035, M9 — Kanban). `'kanban'` marks a
+ * column: a frame with fixed stored geometry whose cards snap into stacked
+ * slots. Absent = a plain frame (T-024), so pre-kanban files stay valid
+ * without a migration (I-08, no version bump).
+ */
+export type GroupRole = 'kanban';
+
 /** A node placed on the canvas. Coordinates are world units (PLAN D-07). */
 export interface Node {
   id: Id;
@@ -70,6 +78,22 @@ export interface Edge {
 export interface Group {
   id: Id;
   name: string;
+  /**
+   * The layout role of the group (T-035, M9 — Kanban). Optional: absent is
+   * a plain frame whose rect is its members' bbox + padding (T-024).
+   * `'kanban'` is a column — a frame with FIXED stored geometry (x/y/w/h,
+   * required iff the role is set) whose member cards snap into stacked
+   * slots. Behaviours attach to the DATA (D-14), not to a mode.
+   */
+  role?: GroupRole;
+  /** Column geometry in world units (T-035) — present iff `role` is set. */
+  x?: number;
+  /** Column geometry in world units (T-035) — present iff `role` is set. */
+  y?: number;
+  /** Column geometry in world units (T-035) — present iff `role` is set. */
+  w?: number;
+  /** Column geometry in world units (T-035) — present iff `role` is set. */
+  h?: number;
 }
 
 /**
@@ -119,6 +143,28 @@ export type Command =
   | { type: 'node.resize'; id: Id; x: number; y: number; w: number; h: number }
   | { type: 'group.assign'; groupId: Id; name: string; ids: Id[] }
   | { type: 'group.unassign'; ids: Id[] }
+  /**
+   * Create a group exactly as given (T-035, M9): a kanban column with its
+   * fixed geometry (`role: 'kanban'` + x/y/w/h, validated like `validateDoc`)
+   * or — in principle — a plain memberless frame. The T-024 `group.assign`
+   * creates groups as a side effect of membership; a column must exist
+   * BEFORE any card joins it (an empty column is the default kanban state).
+   */
+  | { type: 'group.create'; group: Group }
+  /**
+   * Delete the listed groups (T-035, M9): their member nodes survive,
+   * ungrouped, in the SAME patch — one undo restores the groups and every
+   * membership.
+   */
+  | { type: 'group.delete'; ids: Id[] }
+  /**
+   * Set (`groupId`) or clear (`null`) the group of the listed nodes (T-035,
+   * M9) — the membership primitive `group.assign`/`group.unassign` lack:
+   * moving a card between two EXISTING groups in one command. A regular
+   * group left with no members is deleted in the same patch (the T-024
+   * cascade); a kanban column never is (it may legitimately be empty).
+   */
+  | { type: 'node.setGroup'; ids: Id[]; groupId: Id | null }
   | { type: 'edge.create'; edge: Edge }
   | { type: 'edge.delete'; ids: Id[] }
   | { type: 'edge.update'; ids: Id[]; patch: EdgeContentPatch }
