@@ -10,7 +10,11 @@ import './style.css';
 import type { Node, Edge, Doc } from './core/types';
 import { emptyDoc } from './core/doc';
 import { createDocStore } from './core/store';
-import { serializeDoc, deserializeDoc, type FileEnvelope } from './core/serialize';
+import {
+  serializeDoc,
+  deserializeDoc,
+  type FileEnvelope,
+} from './core/serialize';
 import { attachCameraInput } from './input/cameraInput';
 import { createCursorTracker } from './input/cursor';
 import { attachNodeInput } from './input/nodeInput';
@@ -26,9 +30,18 @@ import { createCameraStore } from './view/cameraStore';
 import { createCanvasHost } from './view/canvasHost';
 import { renderBoard } from './view/renderer';
 import { setImageLoadedCallback } from './view/imageCache';
-import { createUiStore, pruneSelection, pruneEdgeSelection } from './view/uiStore';
+import {
+  createUiStore,
+  pruneSelection,
+  pruneEdgeSelection,
+} from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
-import { saveTemplate, listTemplates, deleteTemplate, type TemplateRecord } from './io/templates';
+import {
+  saveTemplate,
+  listTemplates,
+  deleteTemplate,
+  type TemplateRecord,
+} from './io/templates';
 import { exportFile, importFile, pickFile, downloadBlob } from './io/file';
 import { renderDocToPng } from './view/pngExport';
 import { createNodeAt } from './input/cardCommand';
@@ -143,6 +156,8 @@ const nodeInput = attachNodeInput({
   uiStore,
   newId: () => crypto.randomUUID(),
   editNode: (id) => textEditor.edit(id),
+  // T-037: a double-click on a kanban column's header renames it.
+  editColumn: (id) => textEditor.editColumn(id),
 });
 
 // In-place text editor overlay (T-020, T-030): one node.update command per
@@ -256,7 +271,11 @@ let clipboard: ClipboardData | null = null;
 // Ctrl+Shift+Up/Down = bring to front / send to back.
 // Arrow keys = nudge (handled in selectTool).
 window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (
+    e.target instanceof HTMLInputElement ||
+    e.target instanceof HTMLTextAreaElement
+  )
+    return;
   const isMac = navigator.platform.includes('Mac');
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const shift = e.shiftKey;
@@ -265,8 +284,7 @@ window.addEventListener('keydown', (e) => {
   // In mind-map mode plain Enter grows a sibling instead (T-029) — the
   // mind-map handler owns Enter; F2 and double-click still open the editor.
   const editKey =
-    e.key === 'F2' ||
-    (e.key === 'Enter' && uiStore.get().mode !== 'mindmap');
+    e.key === 'F2' || (e.key === 'Enter' && uiStore.get().mode !== 'mindmap');
   if (editKey && !mod) {
     const selection = uiStore.get().selection;
     if (selection.length === 1 && !textEditor.isOpen()) {
@@ -341,7 +359,10 @@ function copySelection(): void {
 function getSelectedEdges(doc: Doc, selection: string[]): Edge[] {
   const edges: Edge[] = [];
   for (const [, edge] of Object.entries(doc.edges)) {
-    if (selection.includes(edge.from.node) && selection.includes(edge.to.node)) {
+    if (
+      selection.includes(edge.from.node) &&
+      selection.includes(edge.to.node)
+    ) {
       edges.push(edge);
     }
   }
@@ -353,7 +374,9 @@ function duplicateNodes(ids: string[]): void {
   const newIds = ids.map(() => crypto.randomUUID());
   const doc = docStore.get();
   const edgeCount = getSelectedEdges(doc, ids).length;
-  const newEdgeIds = Array.from({ length: edgeCount }, () => crypto.randomUUID());
+  const newEdgeIds = Array.from({ length: edgeCount }, () =>
+    crypto.randomUUID(),
+  );
   docStore.dispatch({
     type: 'node.duplicate',
     ids,
@@ -440,8 +463,16 @@ function createToolbar(): void {
     return btn;
   };
 
-  makeBtn({ text: '↶ Undo', onClick: () => docStore.undo(), isDisabled: () => !docStore.canUndo() });
-  makeBtn({ text: '↷ Redo', onClick: () => docStore.redo(), isDisabled: () => !docStore.canRedo() });
+  makeBtn({
+    text: '↶ Undo',
+    onClick: () => docStore.undo(),
+    isDisabled: () => !docStore.canUndo(),
+  });
+  makeBtn({
+    text: '↷ Redo',
+    onClick: () => docStore.redo(),
+    isDisabled: () => !docStore.canRedo(),
+  });
 
   // M9 (T-029): toggle between the free-form board and mind-map mode. The
   // label shows the CURRENT mode; one click switches.
@@ -579,17 +610,46 @@ function createToolbar(): void {
     },
     isDisabled: () => {
       const doc = docStore.get();
-      return !uiStore.get().selection.some((id) => doc.nodes[id]?.groupId !== undefined);
+      return !uiStore
+        .get()
+        .selection.some((id) => doc.nodes[id]?.groupId !== undefined);
     },
   });
 
-  makeBtn({ text: 'Copy', onClick: copySelection, isDisabled: () => uiStore.get().selection.length === 0 });
-  makeBtn({ text: 'Paste', onClick: pasteSelection, isDisabled: () => !clipboard || clipboard.nodes.length === 0 });
-  makeBtn({ text: 'Duplicate', onClick: duplicateSelection, isDisabled: () => uiStore.get().selection.length === 0 });
-  makeBtn({ text: 'Select All', onClick: selectAll, isDisabled: () => docStore.get().order.length === 0 });
-  makeBtn({ text: 'Front', onClick: bringToFront, isDisabled: () => uiStore.get().selection.length === 0 });
-  makeBtn({ text: 'Back', onClick: sendToBack, isDisabled: () => uiStore.get().selection.length === 0 });
-  makeBtn({ text: 'Export', onClick: () => exportFile(docStore.get(), store.get()) });
+  makeBtn({
+    text: 'Copy',
+    onClick: copySelection,
+    isDisabled: () => uiStore.get().selection.length === 0,
+  });
+  makeBtn({
+    text: 'Paste',
+    onClick: pasteSelection,
+    isDisabled: () => !clipboard || clipboard.nodes.length === 0,
+  });
+  makeBtn({
+    text: 'Duplicate',
+    onClick: duplicateSelection,
+    isDisabled: () => uiStore.get().selection.length === 0,
+  });
+  makeBtn({
+    text: 'Select All',
+    onClick: selectAll,
+    isDisabled: () => docStore.get().order.length === 0,
+  });
+  makeBtn({
+    text: 'Front',
+    onClick: bringToFront,
+    isDisabled: () => uiStore.get().selection.length === 0,
+  });
+  makeBtn({
+    text: 'Back',
+    onClick: sendToBack,
+    isDisabled: () => uiStore.get().selection.length === 0,
+  });
+  makeBtn({
+    text: 'Export',
+    onClick: () => exportFile(docStore.get(), store.get()),
+  });
   makeBtn({
     // M8 (T-027): render the content bounds to an offscreen canvas at 2×
     // with padding and download it as a PNG. The render lives in the view

@@ -17,13 +17,18 @@
  * batch (create + setGroup), one undo step — through the pure planner
  * `planKanbanCreate`. Outside every column the ordinary centred creation
  * stands (D-28, unchanged).
+ *
+ * T-037: a double-click on a column's HEADER (empty of nodes — cards sit
+ * below the header strip) renames the column instead: the text overlay
+ * opens on the name (ONE `group.update` per commit). It still creates a
+ * card when the click lands below the header, inside the column body.
  */
 
 import type { Point } from '../core/geometry';
 import type { DocStore } from '../core/store';
 import type { Id } from '../core/types';
 import { hitTest } from '../core/hitTest';
-import { planKanbanCreate } from '../core/kanban';
+import { columnHeaderHit, planKanbanCreate } from '../core/kanban';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
@@ -44,6 +49,12 @@ export interface NodeInputOptions {
    * space. Optional for tests that only exercise creation.
    */
   editNode?: (id: Id) => void;
+  /**
+   * Opens the in-place text editor on a KANBAN COLUMN's name (T-037):
+   * called for a double-click on a column's header strip. Optional for
+   * tests that only exercise creation.
+   */
+  editColumn?: (id: Id) => void;
 }
 
 export interface NodeInput {
@@ -58,7 +69,15 @@ export interface NodeInput {
  * `detach()` that removes every listener.
  */
 export function attachNodeInput(opts: NodeInputOptions): NodeInput {
-  const { canvas, cameraStore, docStore, uiStore, newId, editNode } = opts;
+  const {
+    canvas,
+    cameraStore,
+    docStore,
+    uiStore,
+    newId,
+    editNode,
+    editColumn,
+  } = opts;
 
   // Some browsers synthesise a dblclick from a touch double-tap; remember
   // the pointer type of the last pointerdown so those can be ignored (R8).
@@ -77,6 +96,15 @@ export function attachNodeInput(opts: NodeInputOptions): NodeInput {
     if (existing !== null) {
       // D-28 / T-020: double-click on an existing node opens the editor.
       editNode?.(existing);
+      return;
+    }
+    // T-037: a double-click on a column's HEADER renames the column (the
+    // header is empty of nodes — cards seat below it, so `hitTest` missed).
+    // Before the create planner: below the header, inside the column body,
+    // a double-click still creates a seated card.
+    const header = columnHeaderHit(docStore.get(), world);
+    if (header !== null) {
+      editColumn?.(header);
       return;
     }
     const id = newId();
