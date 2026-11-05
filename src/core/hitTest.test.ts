@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Doc, Node } from './types';
-import { edgeAt, hitTest, hitTestWithHandles, hitTestResizeHandles } from './hitTest';
+import {
+  edgeAt,
+  hitTest,
+  hitTestWithHandles,
+  hitTestResizeHandles,
+  groupFrameRect,
+  groupFrameAt,
+  GROUP_FRAME_PADDING,
+} from './hitTest';
 import type { Point } from './geometry';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
@@ -281,5 +289,46 @@ describe('edgeAt — click an edge along its drawn route (T-033)', () => {
 
   it('a doc with no edges never hits', () => {
     expect(edgeAt(docOf(node('a')), { x: 50, y: 25 }, 1)).toBeNull();
+  });
+});
+
+describe('groupFrameRect — kanban columns (T-035, M9)', () => {
+  it("a column's frame IS its stored geometry, memberless or not", () => {
+    const doc = docOf();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+    };
+    expect(groupFrameRect(doc, 'c1')).toEqual({ x: 10, y: 20, w: 240, h: 400 });
+  });
+
+  it('a column with members still uses the stored rect (not the member bbox)', () => {
+    const doc = docOf(node('a', { x: 26, y: 72, w: 200, h: 120 }));
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+    };
+    doc.nodes.a!.groupId = 'c1';
+    expect(groupFrameRect(doc, 'c1')).toEqual({ x: 10, y: 20, w: 240, h: 400 });
+  });
+
+  it('groupFrameAt resolves clicks inside the column rect', () => {
+    const doc = docOf();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+    };
+    expect(groupFrameAt(doc, { x: 15, y: 25 })).toBe('c1');
+    expect(groupFrameAt(doc, { x: 5, y: 15 })).toBeNull(); // outside
+  });
+
+  it('a regular group still derives its rect from members (T-024 unchanged)', () => {
+    const doc = docOf(node('a', { x: 0, y: 0, w: 100, h: 50 }));
+    doc.groups = { g1: { id: 'g1', name: 'frame' } };
+    doc.nodes.a!.groupId = 'g1';
+    expect(groupFrameRect(doc, 'g1')).toEqual({
+      x: -GROUP_FRAME_PADDING,
+      y: -GROUP_FRAME_PADDING,
+      w: 100 + GROUP_FRAME_PADDING * 2,
+      h: 50 + GROUP_FRAME_PADDING * 2,
+    });
+    expect(groupFrameRect(doc, 'nope')).toBeNull();
   });
 });

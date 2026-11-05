@@ -375,3 +375,79 @@ describe('serialize — edge route field (T-033, M9)', () => {
     expect(validateDoc(fixed)).toEqual([]);
   });
 });
+
+describe('serialize — kanban columns (T-035, M9)', () => {
+  /** A minimal doc with one kanban column and, optionally, one member card. */
+  function docWithColumn(withCard = false) {
+    const doc = emptyDoc();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: -400, y: -200, w: 240, h: 400 },
+    };
+    if (withCard) {
+      doc.nodes['n1'] = {
+        id: 'n1',
+        kind: 'card',
+        x: -384,
+        y: -148,
+        w: 200,
+        h: 120,
+        text: '',
+        color: '#fff',
+        tags: [],
+        groupId: 'c1',
+      };
+      doc.order = ['n1'];
+    }
+    return doc;
+  }
+
+  it('round-trips a kanban column with no warnings (no version bump, I-08)', () => {
+    const back = deserializeDoc(serializeDoc(docWithColumn()));
+    expect(back.warnings).toEqual([]);
+    expect(back.envelope.doc.groups.c1).toEqual({
+      id: 'c1',
+      name: 'To Do',
+      role: 'kanban',
+      x: -400,
+      y: -200,
+      w: 240,
+      h: 400,
+    });
+  });
+
+  it('a column with member cards round-trips membership too', () => {
+    const back = deserializeDoc(serializeDoc(docWithColumn(true)));
+    expect(back.warnings).toEqual([]);
+    expect(back.envelope.doc.nodes.n1!.groupId).toBe('c1');
+  });
+
+  it('a column with invalid geometry warns (validateDoc) but keeps the data', () => {
+    const doc = docWithColumn();
+    doc.groups.c1!.x = NaN;
+    const back = deserializeDoc(serializeDoc(doc));
+    expect(back.warnings.some((w) => w.includes('bad-group-geometry:'))).toBe(true);
+    // The data is preserved as well as JSON can (NaN canonicalises to null,
+    // which still fails the finite check → the warning fires, I-08).
+    expect(back.envelope.doc.groups.c1!.x).toBeNull();
+  });
+
+  it('coerceDoc preserves a valid column and drops an invalid one to a plain group', () => {
+    const good = coerceDoc(docWithColumn());
+    expect(good.groups.c1).toEqual({
+      id: 'c1',
+      name: 'To Do',
+      role: 'kanban',
+      x: -400,
+      y: -200,
+      w: 240,
+      h: 400,
+    });
+    // Role without geometry → plain group (a migration must produce a valid
+    // document).
+    const bad = docWithColumn();
+    delete bad.groups.c1!.x;
+    const fixed = coerceDoc(bad);
+    expect(fixed.groups.c1).toEqual({ id: 'c1', name: 'To Do' });
+    expect(validateDoc(fixed)).toEqual([]);
+  });
+});

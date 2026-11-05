@@ -189,7 +189,27 @@ export function coerceDoc(obj: unknown): Doc {
     for (const [id, group] of Object.entries(doc.groups)) {
       const g = group as unknown as Record<string, unknown>;
       if (typeof g.name === 'string') {
-        groups[id] = { id, name: g.name };
+        // T-035: a kanban column passes through when its geometry is valid
+        // (the same validity `validateDoc` demands) — a role without valid
+        // geometry drops to a plain group (validateDoc would only warn
+        // about it, and a migration must produce a valid document).
+        const role = g.role === 'kanban' ? ('kanban' as const) : undefined;
+        const geo =
+          [g.x, g.y, g.w, g.h].every(
+            (v) => typeof v === 'number' && Number.isFinite(v),
+          ) && (g.w as number) > 0 && (g.h as number) > 0;
+        groups[id] =
+          role !== undefined && geo
+            ? {
+                id,
+                name: g.name,
+                role,
+                x: g.x as number,
+                y: g.y as number,
+                w: g.w as number,
+                h: g.h as number,
+              }
+            : { id, name: g.name };
       }
     }
   }
