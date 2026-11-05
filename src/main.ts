@@ -641,8 +641,15 @@ function createToolbar(): void {
       ) as FileEnvelope;
       void saveTemplate(name, envelope)
         .then(() => {
-          templateNameInput.value = '';
-          saveTemplateBtn.disabled = true;
+          // The IndexedDB write is async — the user may have started typing
+          // the NEXT name while it was in flight (observed in CI: the late
+          // .then cleared the fresh name and re-disabled the button, hanging
+          // the second save in templates.spec test 4). Only reset the field
+          // when it still holds the name this save consumed.
+          if (templateNameInput.value.trim() === name) {
+            templateNameInput.value = '';
+            saveTemplateBtn.disabled = true;
+          }
           void templateList.refresh();
           templateList.open();
         })
