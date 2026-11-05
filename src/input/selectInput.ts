@@ -20,6 +20,14 @@
  * a move-together unit), and a press on a column's × close affordance arms
  * a `group.delete` committed on release (D-26-style).
  *
+ * T-037 (column interactions): a press on a column HEADER arms a column
+ * move (drag past the threshold → the column AND its cards, one batch on
+ * release; a plain click selects the members, the T-024 frame behaviour),
+ * a press on a column's resize affordances arms a resize (preview-only
+ * moves; ONE batch of `group.update` + re-fitted `node.resize`s on
+ * release), and the kanban planner's target column is mirrored into the UI
+ * store as the drop-target highlight while a card drag is in flight.
+ *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
  * a pan owns the pointer (`isPanActive`: Space held or actively panning —
@@ -38,7 +46,18 @@ import {
   groupFrameAt,
   edgeAt,
 } from '../core/hitTest';
-import { columnCloseHit, dragMembersOf, planKanbanDrop } from '../core/kanban';
+import {
+  columnCloseHit,
+  columnEffectiveRect,
+  columnHeaderHit,
+  columnResizeHit,
+  columnResizeRect,
+  dragMembersOf,
+  planColumnMove,
+  planColumnResize,
+  planKanbanDrop,
+  type ColumnResizeEdge,
+} from '../core/kanban';
 import { rectsIntersect } from '../core/geometry';
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
@@ -88,6 +107,65 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     screen: { x: number; y: number };
   } | null = null;
 
+  /**
+   * A column gesture in progress (T-037): a HEADER drag (move the column
+   * and its cards) or an edge-handle drag (resize the stored rect, re-fit
+   * the cards). Armed on press — outside the select machine, like the ×
+   * close press — activated only after the DRAG_THRESHOLD (D-26), previewed
+   * in the UI store on every move (I-04) and committed as ONE batch on
+   * release. Cancel paths (Escape, pointercancel, blur, a plain click)
+   * dispatch nothing.
+   */
+  interface ColumnGesture {
+    pointerId: number;
+    columnId: Id;
+    kind: 'move' | 'resize';
+    /** The gripped edge (resize only). */
+    edge: ColumnResizeEdge;
+    startScreen: { x: number; y: number };
+    startWorld: { x: number; y: number };
+    /** The column's effective rect at press — the resize anchor. */
+    rect: { x: number; y: number; w: number; h: number };
+    /** True once the threshold has been crossed. */
+    active: boolean;
+  }
+  let columnGesture: ColumnGesture | null = null;
+  /** Pointer capture held by a column gesture (its own, separate from the
+   * machine's) so moves and the release keep arriving off-canvas too. */
+  let columnCapturedPointer: number | null = null;
+
+  /** Take pointer capture for the column gesture (best effort). */
+  function captureColumnPointer(pointerId: number): void {
+    if (columnCapturedPointer !== null) return;
+    try {
+      canvas.setPointerCapture(pointerId);
+      columnCapturedPointer = pointerId;
+    } catch {
+      // The pointer may already be gone; the gesture still works while it
+      // stays over the canvas.
+    }
+  }
+
+  /** Release the column gesture's pointer capture. */
+  function releaseColumnPointer(): void {
+    if (columnCapturedPointer === null) return;
+    try {
+      canvas.releasePointerCapture(columnCapturedPointer);
+    } catch {
+      // Capture may already be released (e.g. after pointerup).
+    }
+    columnCapturedPointer = null;
+  }
+
+  /** End the column gesture: disarm, release the capture, clear the
+   * previews. Exactly one of them was ever set. No command (D-26). */
+  function endColumnGesture(): void {
+    columnGesture = null;
+    releaseColumnPointer();
+    uiStore.setColumnDrag(null);
+    uiStore.setColumnResize(null);
+  }
+
   /** What a drag looked like BEFORE the reduce: at pointer-up the machine
    * resets to idle, so the pressed node (the kanban drop's primary card)
    * must be captured here (T-035). */
@@ -114,21 +192,26 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           break;
         case 'setDrag': {
           let d = effect.drag;
-          if (d !== null && drag.previewing && d.ids.length === 1) {
+          let kanbanTarget: Id | null = null;
+          if (d !== null && drag.previewing) {
             // Kanban (T-035): a single-card drag previews glued to its slot
             // while the card is over a column. Pure math over the current
-            // document — the document itself is untouched (I-04).
+            // document — the document itself is untouched (I-04). T-037: the
+            // plan's target column (also for multi-card drags) becomes the
+            // drop-target highlight; over no column it clears.
             const plan = planKanbanDrop(docStore.get(), {
               ids: d.ids,
               dx: d.dx,
               dy: d.dy,
               primaryId: drag.primaryId,
             });
+            kanbanTarget = plan.target;
             if (plan.preview !== null) {
               d = { ids: d.ids, dx: plan.preview.dx, dy: plan.preview.dy };
             }
           }
           uiStore.setDrag(d);
+          uiStore.setKanbanDropTarget(kanbanTarget);
           break;
         }
         case 'dispatch': {
@@ -169,9 +252,12 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
    * rect, in `order` (bottom → top) — the box-select resolution (T-017).
    * Pure w.r.t. the stores: reads the camera and the document once.
    */
-  function nodesIntersectingScreenRect(
-    rect: { x: number; y: number; w: number; h: number },
-  ): Id[] {
+  function nodesIntersectingScreenRect(rect: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }): Id[] {
     const cam = cameraStore.get();
     const topLeft = screenToWorld(cam, { x: rect.x, y: rect.y });
     const bottomRight = screenToWorld(cam, {
@@ -264,7 +350,12 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     // A press on a resize handle of the single selected node starts a
     // resize gesture (T-021) — checked before the connect handles and the
     // body, because corners sit outside the node rect.
-    const resizeHit = hitTestResizeHandles(docStore.get(), world, cameraStore.get(), selection);
+    const resizeHit = hitTestResizeHandles(
+      docStore.get(),
+      world,
+      cameraStore.get(),
+      selection,
+    );
     if (resizeHit !== null && resizeHit.type === 'resize') {
       const node = docStore.get().nodes[resizeHit.id]!;
       feed({
@@ -286,15 +377,51 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     // T-035: a press on a column's × close affordance arms a column delete
     // (group.delete — the cards survive, ungrouped). Committed on release,
     // like every gesture (D-26); cancel paths disarm silently.
-    const closeHit = columnCloseHit(docStore.get(), world, cameraStore.get().zoom);
+    const closeHit = columnCloseHit(
+      docStore.get(),
+      world,
+      cameraStore.get().zoom,
+    );
     if (closeHit !== null) {
       pendingClose = { pointerId: e.pointerId, columnId: closeHit, screen };
       return;
     }
+    // T-037: a press on a column's resize affordance (right-edge midpoint,
+    // bottom-edge midpoint, bottom-right corner — screen-space targets, the
+    // × precedent) arms a resize gesture. Only the primary button (D-26).
+    if (e.button === 0) {
+      const handleHit = columnResizeHit(
+        docStore.get(),
+        world,
+        cameraStore.get().zoom,
+      );
+      if (handleHit !== null) {
+        const rect = columnEffectiveRect(docStore.get(), handleHit.id);
+        if (rect !== null) {
+          columnGesture = {
+            pointerId: e.pointerId,
+            columnId: handleHit.id,
+            kind: 'resize',
+            edge: handleHit.edge,
+            startScreen: screen,
+            startWorld: world,
+            rect,
+            active: false,
+          };
+          captureColumnPointer(e.pointerId);
+          return;
+        }
+      }
+    }
     // A press on a connection handle of a selected node belongs to the
     // connect tool (T-018): stand down so the selection is not cleared and
     // no marquee starts. Body hits fall through like a plain hitTest.
-    const hit = hitTestWithHandles(docStore.get(), world, cameraStore.get(), selection);
+    const hit = hitTestWithHandles(
+      docStore.get(),
+      world,
+      cameraStore.get(),
+      selection,
+    );
     if (hit !== null && hit.type === 'handle') return;
     const hitId = hit !== null ? hit.id : null;
     // T-033: with nothing else under the pointer, an EDGE can be — it sits
@@ -304,6 +431,37 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       hitId === null
         ? edgeAt(docStore.get(), world, cameraStore.get().zoom)
         : null;
+    // T-037: a press on a column HEADER (no node, no edge under the pointer —
+    // they draw above the panel, so they win by render order) arms a column
+    // drag. A plain click keeps the T-024 frame behaviour exactly: the
+    // members are selected up front, as a press anywhere inside the column
+    // does. An empty column has no members to drag along — fall through to
+    // the ordinary empty-space flow (marquee), unchanged.
+    if (hitId === null && hitEdgeId === null && e.button === 0 && !e.shiftKey) {
+      const headerId = columnHeaderHit(docStore.get(), world);
+      if (headerId !== null) {
+        const doc = docStore.get();
+        const members: Id[] = [];
+        for (const id of doc.order) {
+          if (doc.nodes[id]?.groupId === headerId) members.push(id);
+        }
+        if (members.length > 0) {
+          uiStore.setSelection(members);
+          columnGesture = {
+            pointerId: e.pointerId,
+            columnId: headerId,
+            kind: 'move',
+            edge: 'right', // unused by a move gesture
+            startScreen: screen,
+            startWorld: world,
+            rect: { x: 0, y: 0, w: 0, h: 0 }, // unused by a move gesture
+            active: false,
+          };
+          captureColumnPointer(e.pointerId);
+          return;
+        }
+      }
+    }
     if (hitId === null && !e.shiftKey && hitEdgeId === null) {
       // A press on empty space inside a group FRAME selects all its members
       // (T-024) instead of starting a marquee. Dragging any member afterwards
@@ -339,6 +497,41 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerMove(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    // T-037: a column gesture is live even while the select machine is idle
+    // (it was armed outside the machine). Move updates the PREVIEW only
+    // (I-04); the commit happens on release.
+    if (columnGesture !== null && e.pointerId === columnGesture.pointerId) {
+      const { screen, world } = positions(e);
+      if (!columnGesture.active) {
+        const d = Math.hypot(
+          screen.x - columnGesture.startScreen.x,
+          screen.y - columnGesture.startScreen.y,
+        );
+        if (d < DRAG_THRESHOLD) return;
+        columnGesture.active = true;
+      }
+      if (columnGesture.kind === 'move') {
+        uiStore.setColumnDrag({
+          id: columnGesture.columnId,
+          dx: world.x - columnGesture.startWorld.x,
+          dy: world.y - columnGesture.startWorld.y,
+        });
+      } else {
+        const rect = columnResizeRect(
+          columnGesture.rect,
+          columnGesture.edge,
+          world,
+        );
+        uiStore.setColumnResize({
+          id: columnGesture.columnId,
+          x: rect.x,
+          y: rect.y,
+          w: rect.w,
+          h: rect.h,
+        });
+      }
+      return;
+    }
     if (state.mode === 'idle') return; // no gesture → nothing to update
     const { screen, world } = positions(e);
     feed({ type: 'pointerMove', pointerId: e.pointerId, screen, world });
@@ -357,9 +550,40 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           screen.y - pendingClose.screen.y,
         ) < DRAG_THRESHOLD
       ) {
-        docStore.dispatch({ type: 'group.delete', ids: [pendingClose.columnId] });
+        docStore.dispatch({
+          type: 'group.delete',
+          ids: [pendingClose.columnId],
+        });
       }
       pendingClose = null;
+      return;
+    }
+    // T-037: release of a column gesture. Past the threshold it commits
+    // exactly ONE batch (I-04) — the move (column + cards) or the resize
+    // (geometry + re-fitted cards); under the threshold it was a plain
+    // click, whose selection was already set at press. Another pointer's
+    // release flows on to the machine.
+    if (columnGesture !== null && e.pointerId === columnGesture.pointerId) {
+      const gesture = columnGesture;
+      const { world } = positions(e);
+      if (gesture.active) {
+        if (gesture.kind === 'move') {
+          docStore.dispatch(
+            planColumnMove(
+              docStore.get(),
+              gesture.columnId,
+              world.x - gesture.startWorld.x,
+              world.y - gesture.startWorld.y,
+            ),
+          );
+        } else {
+          const rect = columnResizeRect(gesture.rect, gesture.edge, world);
+          docStore.dispatch(
+            planColumnResize(docStore.get(), gesture.columnId, rect),
+          );
+        }
+      }
+      endColumnGesture();
       return;
     }
     if (state.mode === 'idle') return; // nobody is pressed on a node
@@ -371,6 +595,11 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     if (e.pointerType === 'touch') return;
     if (pendingClose !== null && e.pointerId === pendingClose.pointerId) {
       pendingClose = null;
+      return;
+    }
+    // T-037: a cancelled column gesture dispatches nothing (D-26).
+    if (columnGesture !== null && e.pointerId === columnGesture.pointerId) {
+      endColumnGesture();
       return;
     }
     feed({ type: 'pointerCancel', pointerId: e.pointerId });
@@ -388,6 +617,13 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       return;
     }
     if (key === 'Backspace') e.preventDefault(); // never navigate back
+    // T-037: while a column gesture is armed, keys stand down — Escape
+    // cancels with no command (D-26), and a stray Delete can never delete
+    // the cards of the column being dragged.
+    if (columnGesture !== null) {
+      if (key === 'Escape') endColumnGesture();
+      return;
+    }
     // Ctrl+A = select all (T-016).
     if (key === 'a' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -400,11 +636,18 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     }
     // Ctrl+C = copy, Ctrl+V = paste, Ctrl+D = duplicate (T-016).
     // These are handled in main.ts for clipboard access.
-    feed({ type: 'key', key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey });
+    feed({
+      type: 'key',
+      key,
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+    });
   }
 
   function onBlur(): void {
     pendingClose = null;
+    endColumnGesture(); // T-037: blur cancels the column gesture, no command
     feed({ type: 'blur' });
   }
 
@@ -433,6 +676,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       }
       state = initialSelectState();
       pendingClose = null;
+      endColumnGesture(); // T-037
     },
   };
 }
