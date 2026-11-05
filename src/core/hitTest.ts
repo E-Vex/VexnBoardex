@@ -11,7 +11,7 @@ import { rectContains } from './geometry';
 import type { Doc, Id, Anchor } from './types';
 import type { Point, Rect } from './geometry';
 import { edgePoints, nodeRect, polylineDistance } from './edgeGeometry';
-import { columnRect, isColumn } from './kanban';
+import { columnEffectiveRectOf, columnMembers, isColumn } from './kanban';
 
 /** Camera shape used for coordinate conversion (matches view/camera.ts). */
 type Camera = { x: number; y: number; zoom: number };
@@ -72,14 +72,18 @@ export function groupFrameAt(doc: Doc, point: Point): Id | null {
  * has no members (T-024). Pure. T-035: a KANBAN COLUMN's frame is its stored
  * geometry (fixed) — the click target, the renderer and the PNG content
  * bounds all see the same rect through this one function, and a column
- * paints a frame even with no members. */
+ * paints a frame even with no members. T-037: the frame is the column's
+ * EFFECTIVE rect — the stored height grown to fit its cards (auto-grow) —
+ * so the grown area is clickable and exported like any part of the column. */
 export function groupFrameRect(
   doc: Doc,
   groupId: Id,
 ): { x: number; y: number; w: number; h: number } | null {
   const group = doc.groups[groupId];
   if (group === undefined) return null;
-  if (isColumn(group)) return columnRect(group);
+  if (isColumn(group)) {
+    return columnEffectiveRectOf(group, columnMembers(doc, groupId));
+  }
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;

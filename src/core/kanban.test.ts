@@ -16,21 +16,32 @@ import {
   KANBAN_BOARD_COLUMNS,
   KANBAN_CARD_GAP,
   KANBAN_HEADER_H,
+  KANBAN_MIN_COLUMN_W,
+  KANBAN_MIN_COLUMN_H,
   KANBAN_PADDING,
   columnAt,
   columnCloseHit,
   columnClosePoint,
+  columnContentHeight,
+  columnEffectiveRect,
+  columnEffectiveRectOf,
+  columnHeaderHit,
   columnMembers,
   columnRect,
+  columnResizeHit,
+  columnResizeRect,
   columnsOf,
   dragMembersOf,
   insertionIndex,
   isColumn,
+  planColumnMove,
+  planColumnResize,
   planKanbanBoard,
   planKanbanCreate,
   planKanbanDrop,
   slotPositions,
 } from './kanban';
+import { groupFrameRect } from './hitTest';
 
 function node(id: string, overrides: Partial<Node> = {}): Node {
   return {
@@ -406,5 +417,186 @@ describe('planKanbanBoard — To Do / Doing / Done', () => {
 
   it('throws without three ids (programming-error guard)', () => {
     expect(() => planKanbanBoard(emptyDoc(), { x: 0, y: 0 }, ['x1'])).toThrow();
+  });
+});
+
+describe('kanban — auto-grow (T-037: the effective column rect)', () => {
+  it('columnContentHeight: 0 for no cards; header + padding + cards + gaps otherwise', () => {
+    expect(columnContentHeight([])).toBe(0);
+    // One 120-high card: 36 + 16 + 120 + 16 = 188.
+    expect(columnContentHeight([node('a', { h: 120 })])).toBe(
+      KANBAN_HEADER_H + KANBAN_PADDING + 120 + KANBAN_PADDING,
+    );
+    // Three 120-high cards: one header, two gaps, both paddings.
+    expect(
+      columnContentHeight([node('a', { h: 120 }), node('b', { h: 120 }), node('c', { h: 120 })]),
+    ).toBe(KANBAN_HEADER_H + KANBAN_PADDING + 3 * 120 + 2 * KANBAN_CARD_GAP + KANBAN_PADDING);
+  });
+
+  it('columnEffectiveRectOf: stored height is a floor, growth extends downward', () => {
+    const col = column('c1');
+    const one = [node('a', { h: 120 })]; // needs 188 < 400
+    const three = [node('a', { h: 120 }), node('b', { h: 120 }), node('c', { h: 120 })]; // 452 > 400
+    expect(columnEffectiveRectOf(col, [])).toEqual({ x: 0, y: 0, w: 240, h: 400 });
+    expect(columnEffectiveRectOf(col, one)).toEqual({ x: 0, y: 0, w: 240, h: 400 });
+    expect(columnEffectiveRectOf(col, three)).toEqual({ x: 0, y: 0, w: 240, h: 452 });
+    expect(columnEffectiveRectOf({ id: 'g', name: 'f' }, [])).toBeNull();
+  });
+
+  it('columnEffectiveRect resolves by id against the document', () => {
+    const doc = board([{ id: 'a', col: 'c1' }]);
+    expect(columnEffectiveRect(doc, 'c1')).toEqual({ x: 0, y: 0, w: 240, h: 400 });
+    expect(columnEffectiveRect(doc, 'nope')).toBeNull();
+  });
+
+  it('columnAt targets the GROWN area below the stored height', () => {
+    const doc = board([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c1', y: SLOT1.y },
+      { id: 'c', col: 'c1', y: SLOT1.y + 132 },
+    ]);
+    // Three cards → content 452; a point at y 430 is inside the grown column.
+    expect(columnAt(doc, { x: 100, y: 430 })).toBe('c1');
+    // Past the grown bottom it is not.
+    expect(columnAt(doc, { x: 100, y: 470 })).toBeNull();
+  });
+
+  it('the grown frame is what groupFrameRect/PNG bounds see (hitTest route)', () => {
+    // From hitTest (same layer): the one rect function used by frame clicks
+    // and PNG export carries the growth.
+    const doc = board([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c1', y: SLOT1.y },
+      { id: 'c', col: 'c1', y: SLOT1.y + 132 },
+    ]);
+    expect(groupFrameRect(doc, 'c1')).toEqual({ x: 0, y: 0, w: 240, h: 452 });
+  });
+});
+
+describe('kanban — column affordance hit-tests (T-037)', () => {
+  it('columnHeaderHit: the header strip only; later groups win', () => {
+    const doc = board();
+    expect(columnHeaderHit(doc, { x: 100, y: 18 })).toBe('c1'); // middle of the header
+    expect(columnHeaderHit(doc, { x: 310, y: 0 })).toBe('c2'); // top edge counts
+    expect(columnHeaderHit(doc, { x: 100, y: 40 })).toBeNull(); // below the header
+    expect(columnHeaderHit(doc, { x: 250, y: 18 })).toBeNull(); // the gap
+    // An overlapping later column wins the header hit.
+    doc.groups = { ...doc.groups, c3: column('c3', 100, 0, 'Over') };
+    expect(columnHeaderHit(doc, { x: 110, y: 18 })).toBe('c3');
+  });
+
+  it('columnResizeHit: right/bottom/corner in screen space at any zoom', () => {
+    const doc = board();
+    const right = { x: 240, y: 200 }; // right-edge midpoint of c1
+    const bottom = { x: 120, y: 400 }; // bottom-edge midpoint
+    const corner = { x: 240, y: 400 };
+    expect(columnResizeHit(doc, right, 1)).toEqual({ id: 'c1', edge: 'right' });
+    expect(columnResizeHit(doc, bottom, 1)).toEqual({ id: 'c1', edge: 'bottom' });
+    // The corner wins when all three radii could match.
+    expect(columnResizeHit(doc, corner, 1)).toEqual({ id: 'c1', edge: 'corner' });
+    // 5 world units away at zoom 2 is 10 screen px — outside the 8px radius.
+    expect(columnResizeHit(doc, { x: 245, y: 200 }, 2)).toBeNull();
+    // 3 world units away at zoom 2 is 6 screen px — inside.
+    expect(columnResizeHit(doc, { x: 243, y: 200 }, 2)).toEqual({ id: 'c1', edge: 'right' });
+    expect(columnResizeHit(doc, { x: 0, y: 0 }, 1)).toBeNull();
+  });
+
+  it('columnResizeRect: top-left anchored, dimensions clamped to the minimum', () => {
+    const orig = { x: 0, y: 0, w: 240, h: 400 };
+    expect(columnResizeRect(orig, 'right', { x: 320, y: 999 })).toEqual({
+      x: 0, y: 0, w: 320, h: 400,
+    });
+    expect(columnResizeRect(orig, 'bottom', { x: 999, y: 500 })).toEqual({
+      x: 0, y: 0, w: 240, h: 500,
+    });
+    expect(columnResizeRect(orig, 'corner', { x: 320, y: 500 })).toEqual({
+      x: 0, y: 0, w: 320, h: 500,
+    });
+    // Dragging past the anchor clamps at the minimum, never flips.
+    expect(columnResizeRect(orig, 'corner', { x: -50, y: -50 })).toEqual({
+      x: 0, y: 0, w: KANBAN_MIN_COLUMN_W, h: KANBAN_MIN_COLUMN_H,
+    });
+  });
+});
+
+describe('planColumnMove — drag the whole column (T-037)', () => {
+  it('moves the geometry AND every member card in ONE batch', () => {
+    const doc = board([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c1', y: SLOT1.y },
+    ]);
+    const plan = planColumnMove(doc, 'c1', 100, 50);
+    const next = applyPatch(doc, compileCommand(doc, plan));
+    expect(next.groups.c1).toMatchObject({ x: 100, y: 50, w: 240, h: 400 });
+    expect(next.nodes.a).toMatchObject({ x: 116, y: 102 });
+    expect(next.nodes.b).toMatchObject({ x: 116, y: 102 + 132 });
+    expect(validateDoc(next)).toEqual([]);
+    // ONE undo restores the whole move.
+    const undone = applyPatch(next, invertPatch(compileCommand(doc, plan)));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('an empty column moves alone; a zero delta is a no-op', () => {
+    const plan = planColumnMove(board(), 'c1', 100, 50);
+    const next = applyPatch(board(), compileCommand(board(), plan));
+    expect(next.nodes).toEqual({});
+    expect(next.groups.c1).toMatchObject({ x: 100, y: 50 });
+    expect(isEmptyPatch(compileCommand(board(), planColumnMove(board(), 'c1', 0, 0)))).toBe(true);
+    expect(() => planColumnMove(board(), 'nope', 1, 1)).toThrow();
+  });
+});
+
+describe('planColumnResize — resize the column, re-fit the cards (T-037)', () => {
+  it('sets the stored geometry and stretches every card to the inner width', () => {
+    const doc = board([{ id: 'a', col: 'c1' }, { id: 'b', col: 'c1', y: SLOT1.y }]);
+    const plan = planColumnResize(doc, 'c1', { x: 0, y: 0, w: 320, h: 500 });
+    const next = applyPatch(doc, compileCommand(doc, plan));
+    expect(next.groups.c1).toMatchObject({ x: 0, y: 0, w: 320, h: 500 });
+    // Inner width 320 − 32 = 288; x inset 16; heights and stacking untouched.
+    expect(next.nodes.a).toMatchObject({ x: 16, y: 52, w: 288, h: 120 });
+    expect(next.nodes.b).toMatchObject({ x: 16, y: 184, w: 288 });
+    expect(validateDoc(next)).toEqual([]);
+    // ONE undo restores the exact original.
+    const undone = applyPatch(next, invertPatch(compileCommand(doc, plan)));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('an empty column resizes alone (just the group.update)', () => {
+    const doc = board();
+    const plan = planColumnResize(doc, 'c1', { x: 10, y: 20, w: 240, h: 400 });
+    const next = applyPatch(doc, compileCommand(doc, plan));
+    expect(next.groups.c1).toMatchObject({ x: 10, y: 20 });
+    expect(next.nodes).toEqual({});
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('guards programming errors (unknown column, no inner width)', () => {
+    expect(() => planColumnResize(board(), 'nope', { x: 0, y: 0, w: 240, h: 400 })).toThrow();
+    expect(() => planColumnResize(board(), 'c1', { x: 0, y: 0, w: 20, h: 400 })).toThrow();
+  });
+});
+
+describe('planKanbanDrop/planKanbanCreate — T-037 follow-ups', () => {
+  it('the plan reports its drop-target column for the highlight', () => {
+    const doc = board([{ id: 'a', col: 'c1' }]);
+    const over = planKanbanDrop(doc, { ids: ['a'], dx: 0, dy: 0, primaryId: 'a' });
+    expect(over.target).toBe('c1');
+    const out = planKanbanDrop(doc, { ids: ['a'], dx: 0, dy: 800, primaryId: 'a' });
+    expect(out.target).toBeNull();
+    // A regular-group drag reports no target either.
+    const grouped = board([{ id: 'a', col: undefined }]);
+    grouped.groups = { ...grouped.groups, g1: { id: 'g1', name: 'frame' } };
+    grouped.nodes.a!.groupId = 'g1';
+    expect(
+      planKanbanDrop(grouped, { ids: ['a'], dx: 10, dy: 0, primaryId: 'a' }).target,
+    ).toBeNull();
+  });
+
+  it('a card created inside a column fills it (the inner width)', () => {
+    const doc = board();
+    const command = planKanbanCreate(doc, { x: 100, y: 60 }, 'new');
+    const next = applyPatch(doc, compileCommand(doc, command!));
+    expect(next.nodes.new!.w).toBe(240 - 2 * KANBAN_PADDING);
+    expect(validateDoc(next)).toEqual([]);
   });
 });

@@ -16,6 +16,9 @@
  * - the create plan: a double-click inside a column creates the card
  *   already seated in its slot, membership set, one batch;
  * - the board plan: three columns (To Do / Doing / Done) in one batch.
+ * - T-037: the column's EFFECTIVE rect (the stored height grown to fit its
+ *   cards — auto-grow), the header/resize affordance hit-tests, and the
+ *   column move/resize plans (ONE batch each, cards follow the column).
  *
  * Planning never mutates the document; the caller dispatches the command.
  */
@@ -41,6 +44,18 @@ export const KANBAN_PADDING = 16;
 export const KANBAN_CARD_GAP = 12;
 /** Screen-px hit radius of the column's × close affordance (T-021 style). */
 export const KANBAN_CLOSE_HIT_RADIUS = 10;
+
+/**
+ * The smallest width/height a column resize gesture may produce (T-037):
+ * keeps the header + one card slot reachable and the inner card width
+ * comfortably positive (inner = w − 2·KANBAN_PADDING ≥ 88).
+ */
+export const KANBAN_MIN_COLUMN_W = 120;
+/** See `KANBAN_MIN_COLUMN_W`. */
+export const KANBAN_MIN_COLUMN_H = 120;
+
+/** Screen-px hit radius of the column's resize affordances (T-021 style). */
+export const KANBAN_RESIZE_HIT_RADIUS = 8;
 
 /** The default board's column names, left → right. */
 export const KANBAN_BOARD_COLUMNS = ['To Do', 'Doing', 'Done'] as const;
@@ -71,6 +86,46 @@ export function columnsOf(doc: Doc): Group[] {
   return Object.values(doc.groups).filter(isColumn);
 }
 
+/**
+ * The height a column's stacked cards need (T-037, auto-grow): header +
+ * padding above the first card + every card height + the gaps between them
+ * + padding below the last one. Zero for an empty column — with no cards
+ * there is no content, and the STORED height stands. Pure; heights vary.
+ */
+export function columnContentHeight(cards: Node[]): number {
+  if (cards.length === 0) return 0;
+  let h = KANBAN_HEADER_H + KANBAN_PADDING + KANBAN_PADDING;
+  for (const card of cards) h += card.h + KANBAN_CARD_GAP;
+  return h - KANBAN_CARD_GAP;
+}
+
+/**
+ * The column's STORED rect grown to fit its cards (T-037, auto-grow): the
+ * stored `h` is a FLOOR, and the effective height is `max(stored, content)`
+ * — a column never clips its cards, and never mutates the document to grow
+ * (the height is derived, like edge geometry is from node rects, D-31). The
+ * top-left corner never moves (growth extends downward). Null when the
+ * group is not a column or its stored geometry is missing (defensive).
+ */
+export function columnEffectiveRectOf(group: Group, members: Node[]): Rect | null {
+  const stored = columnRect(group);
+  if (stored === null) return null;
+  const content = columnContentHeight(members);
+  return content > stored.h ? { ...stored, h: content } : stored;
+}
+
+/**
+ * `columnEffectiveRectOf` resolved against the document (T-037): the
+ * column's grown rect, or null when `columnId` is not a column. The one
+ * function every caller — renderer, hit-testing, drop planning, PNG bounds
+ * — sees, so the painted, clickable and droppable column are the same rect.
+ */
+export function columnEffectiveRect(doc: Doc, columnId: Id): Rect | null {
+  const group = doc.groups[columnId];
+  if (group === undefined || !isColumn(group)) return null;
+  return columnEffectiveRectOf(group, columnMembers(doc, columnId));
+}
+
 /** The member nodes of `columnId`, in `doc.order` (bottom → top). */
 export function columnMembers(doc: Doc, columnId: Id): Node[] {
   const members: Node[] = [];
@@ -82,15 +137,16 @@ export function columnMembers(doc: Doc, columnId: Id): Node[] {
 }
 
 /**
- * The column whose rect contains `point`, or null. Later groups win (the
- * same rule `groupFrameAt` uses) — overlapping columns resolve top-most by
- * insertion order.
+ * The column whose EFFECTIVE rect contains `point`, or null. Later groups win
+ * (the same rule `groupFrameAt` uses) — overlapping columns resolve top-most
+ * by insertion order. T-037: the grown area below the stored height is a
+ * drop target like any other part of the column.
  */
 export function columnAt(doc: Doc, point: Point): Id | null {
   let hit: Id | null = null;
   for (const [id, group] of Object.entries(doc.groups)) {
     if (!isColumn(group)) continue;
-    const rect = columnRect(group);
+    const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
     if (rect !== null && rectContains(rect, point)) hit = id;
   }
   return hit;
@@ -118,6 +174,91 @@ export function columnCloseHit(doc: Doc, point: Point, zoom: number): Id | null 
     if (d * zoom <= KANBAN_CLOSE_HIT_RADIUS) return id;
   }
   return null;
+}
+
+// ── Column affordances (T-037) ───────────────────────────────────────────────
+
+/**
+ * The column whose HEADER strip contains `point`, or null (T-037): the
+ * header is the drag handle — a press there moves the whole column (the ×
+ * zone is hit-tested first by the input layer, so it never reaches here as
+ * a drag target). Later groups win, the `columnAt` rule. The strip spans the
+ * EFFECTIVE rect's full width and the first KANBAN_HEADER_H units.
+ */
+export function columnHeaderHit(doc: Doc, point: Point): Id | null {
+  let hit: Id | null = null;
+  for (const [id, group] of Object.entries(doc.groups)) {
+    if (!isColumn(group)) continue;
+    const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
+    if (
+      rect !== null &&
+      rectContains(rect, point) &&
+      point.y <= rect.y + KANBAN_HEADER_H
+    ) {
+      hit = id;
+    }
+  }
+  return hit;
+}
+
+/** Which edge of a column a resize affordance grips (T-037). */
+export type ColumnResizeEdge = 'right' | 'bottom' | 'corner';
+
+/** A column resize affordance hit (T-037): the column and the gripped edge. */
+export interface ColumnResizeHitResult {
+  id: Id;
+  edge: ColumnResizeEdge;
+}
+
+/**
+ * The column resize affordance under `point`, or null (T-037): three handles
+ * on the EFFECTIVE rect — the right edge's midpoint (width only), the
+ * bottom edge's midpoint (height only) and the bottom-right corner (both).
+ * The hit test happens in SCREEN space (`world distance × zoom` against the
+ * radius), so the targets stay clickable at any zoom — the × affordance
+ * precedent (T-035) and the resize handles (T-021).
+ */
+export function columnResizeHit(
+  doc: Doc,
+  point: Point,
+  zoom: number,
+): ColumnResizeHitResult | null {
+  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  for (const [id, group] of Object.entries(doc.groups)) {
+    if (!isColumn(group)) continue;
+    const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
+    if (rect === null) continue;
+    // The corner is the most specific: a point near it may be inside all
+    // three radii, so it wins over the edge midpoints.
+    const targets: [ColumnResizeEdge, number, number][] = [
+      ['corner', rect.x + rect.w, rect.y + rect.h],
+      ['right', rect.x + rect.w, rect.y + rect.h / 2],
+      ['bottom', rect.x + rect.w / 2, rect.y + rect.h],
+    ];
+    for (const [edge, wx, wy] of targets) {
+      const d = Math.hypot(point.x - wx, point.y - wy);
+      if (d * zoom <= KANBAN_RESIZE_HIT_RADIUS) return { id, edge };
+    }
+  }
+  return null;
+}
+
+/**
+ * The resized column rect from dragging `edge` of `orig` to `world`
+ * (T-037): the top-left corner stays ANCHORED (only the right and bottom
+ * edges move), and both dimensions clamp to the minimum — the resize-handle
+ * precedent (T-021's `resizeRect`). Pure.
+ */
+export function columnResizeRect(
+  orig: Rect,
+  edge: ColumnResizeEdge,
+  world: Point,
+): Rect {
+  const w =
+    edge === 'bottom' ? orig.w : Math.max(KANBAN_MIN_COLUMN_W, world.x - orig.x);
+  const h =
+    edge === 'right' ? orig.h : Math.max(KANBAN_MIN_COLUMN_H, world.y - orig.y);
+  return { x: orig.x, y: orig.y, w, h };
 }
 
 /**
@@ -223,7 +364,8 @@ export interface KanbanDropArgs {
   primaryId: Id | null;
 }
 
-/** A planned drop: the commit command plus the (optional) snapped preview. */
+/** A planned drop: the commit command, the (optional) snapped preview and
+ * the drop-target column (T-037). */
 export interface KanbanDropPlan {
   /**
    * The adjusted preview delta for a SINGLE-card drag: the card renders
@@ -232,6 +374,12 @@ export interface KanbanDropPlan {
    * express per-card slots).
    */
   preview: { dx: number; dy: number } | null;
+  /**
+   * The column the primary card is over (T-037): the drop-target highlight
+   * the UI layer paints while the gesture is in flight — null over no
+   * column (and for regular-group drags, which never snap).
+   */
+  target: Id | null;
   /**
    * The pointer-up commit: either the plain `node.move` the select machine
    * emitted, or a `batch` of per-card moves + membership changes + source
@@ -265,7 +413,7 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
   const dragged = args.ids
     .map((id) => doc.nodes[id])
     .filter((n): n is Node => n !== undefined);
-  if (dragged.length === 0) return { preview: null, command: plain };
+  if (dragged.length === 0) return { preview: null, target: null, command: plain };
 
   // A regular-group drag never snaps.
   const inRegularGroup = dragged.some((n) => {
@@ -273,7 +421,7 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
     const g = doc.groups[n.groupId];
     return g !== undefined && !isColumn(g);
   });
-  if (inRegularGroup) return { preview: null, command: plain };
+  if (inRegularGroup) return { preview: null, target: null, command: plain };
 
   const primary =
     (args.primaryId !== null ? doc.nodes[args.primaryId] : undefined) ?? dragged[0]!;
@@ -300,7 +448,7 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
 
   // Over no column: the raw move; column members leave, sources restack.
   if (targetId === null) {
-    if (columnCards.length === 0) return { preview: null, command: plain };
+    if (columnCards.length === 0) return { preview: null, target: null, command: plain };
     const commands: Command[] = [
       plain,
       { type: 'node.setGroup', ids: columnCards.map((n) => n.id), groupId: null },
@@ -308,13 +456,13 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
     for (const source of sources) {
       commands.push(...closeGaps(doc, source, draggedIds));
     }
-    return { preview: null, command: { type: 'batch', commands } };
+    return { preview: null, target: null, command: { type: 'batch', commands } };
   }
 
   // Over a column: insert at the drop position and restack.
   const target = doc.groups[targetId]!;
   const rect = columnRect(target);
-  if (rect === null) return { preview: null, command: plain }; // defensive
+  if (rect === null) return { preview: null, target: null, command: plain }; // defensive
 
   const others = columnMembers(doc, targetId)
     .filter((n) => !draggedIds.has(n.id))
@@ -345,7 +493,7 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
       preview = { dx: slot.x - primary.x, dy: slot.y - primary.y };
     }
   }
-  return { preview, command: { type: 'batch', commands } };
+  return { preview, target: targetId, command: { type: 'batch', commands } };
 }
 
 // ── Create planning ─────────────────────────────────────────────────────────
@@ -363,7 +511,10 @@ export function planKanbanCreate(doc: Doc, world: Point, id: Id): Command | null
   const rect = columnRect(doc.groups[columnId]!);
   if (rect === null) return null; // defensive
 
+  // T-037: a card born in a column FILLS it — the inner width, so a card
+  // created in a resized column matches its siblings.
   const base = newNode(id, 'card', 0, 0);
+  const cardW = Math.max(1, rect.w - 2 * KANBAN_PADDING);
   const others = columnMembers(doc, columnId)
     .filter((n) => n.id !== id)
     .sort(stackSort);
@@ -375,7 +526,7 @@ export function planKanbanCreate(doc: Doc, world: Point, id: Id): Command | null
   const slot = targets.get(id)!;
   commands.push({
     type: 'node.create',
-    node: { ...base, x: slot.x, y: slot.y },
+    node: { ...base, x: slot.x, y: slot.y, w: cardW },
   });
   commands.push({ type: 'node.setGroup', ids: [id], groupId: columnId });
   return { type: 'batch', commands };
@@ -422,4 +573,79 @@ export function planKanbanBoard(doc: Doc, anchor: Point, ids: Id[]): Command {
       },
     })),
   };
+}
+
+// ── Column move / resize planning (T-037) ────────────────────────────────────
+
+/**
+ * Plan moving a whole column by `(dx, dy)` (T-037): the stored geometry
+ * moves (`group.update`) AND every member card moves with it (`node.move`) —
+ * ONE batch = one undo step, exactly like a group-frame move (T-024). A
+ * column is a container, so its cards must follow it or they would be left
+ * behind outside the frame they belong to. A (0, 0) delta compiles to an
+ * empty patch (D-22). Pure; the caller dispatches on pointer-up (I-04).
+ */
+export function planColumnMove(doc: Doc, columnId: Id, dx: number, dy: number): Command {
+  const group = doc.groups[columnId];
+  if (group === undefined || !isColumn(group)) {
+    throw new Error(`planColumnMove: unknown column "${columnId}"`);
+  }
+  const commands: Command[] = [];
+  if (dx !== 0 || dy !== 0) {
+    const members = columnMembers(doc, columnId);
+    if (members.length > 0) {
+      commands.push({
+        type: 'node.move',
+        ids: members.map((n) => n.id),
+        dx,
+        dy,
+      });
+    }
+    commands.push({
+      type: 'group.update',
+      ids: [columnId],
+      // A valid column always has finite geometry (validateDoc, D-24).
+      patch: { x: group.x! + dx, y: group.y! + dy },
+    });
+  }
+  return { type: 'batch', commands };
+}
+
+/**
+ * Plan resizing a column to `rect` (T-037): the stored geometry changes
+ * (`group.update`) and every member card re-fits the column — inset x and
+ * the inner width, heights untouched (cards stack from the top; the column
+ * auto-grows for them) — as per-card `node.resize`s. ONE batch = one undo
+ * step. Cards whose rect is already right are skipped by the compiler
+ * (D-22 no-ops). Pure; the caller dispatches on pointer-up (I-04).
+ */
+export function planColumnResize(doc: Doc, columnId: Id, rect: Rect): Command {
+  const group = doc.groups[columnId];
+  if (group === undefined || !isColumn(group)) {
+    throw new Error(`planColumnResize: unknown column "${columnId}"`);
+  }
+  const inner = rect.w - 2 * KANBAN_PADDING;
+  if (inner <= 0) {
+    throw new Error(
+      `planColumnResize: rect.w ${rect.w} leaves no inner width for cards`,
+    );
+  }
+  const commands: Command[] = [
+    {
+      type: 'group.update',
+      ids: [columnId],
+      patch: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+    },
+  ];
+  for (const card of columnMembers(doc, columnId)) {
+    commands.push({
+      type: 'node.resize',
+      id: card.id,
+      x: rect.x + KANBAN_PADDING,
+      y: card.y,
+      w: inner,
+      h: card.h,
+    });
+  }
+  return { type: 'batch', commands };
 }
