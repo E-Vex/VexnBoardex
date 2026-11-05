@@ -294,3 +294,81 @@ describe('validateDoc — bad-route (T-033)', () => {
     expect(errs.some((e) => e.startsWith('bad-route:'))).toBe(true);
   });
 });
+
+describe('validateDoc — kanban groups (T-035)', () => {
+  it('accepts a kanban column with finite geometry', () => {
+    const doc = validDoc();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+    };
+    expect(validateDoc(doc)).toEqual([]);
+  });
+
+  it('accepts a plain group without role or geometry (pre-kanban files)', () => {
+    const doc = validDoc();
+    doc.groups = { g1: group('g1') };
+    expect(validateDoc(doc)).toEqual([]);
+  });
+
+  it('flags an unknown role', () => {
+    const doc = validDoc();
+    doc.groups = {
+      g1: { id: 'g1', name: 'g', role: 'swimlane' as Group['role'] },
+    };
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-group-role:'))).toBe(true);
+  });
+
+  it('flags a column missing geometry', () => {
+    const doc = validDoc();
+    doc.groups = { c1: { id: 'c1', name: 'To Do', role: 'kanban' } };
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-group-geometry:'))).toBe(true);
+  });
+
+  it('flags a column with partially missing geometry', () => {
+    const doc = validDoc();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240 },
+    };
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-group-geometry:'))).toBe(true);
+  });
+
+  it('flags a column with non-finite geometry', () => {
+    const doc = validDoc();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: NaN, y: 0, w: 240, h: 400 },
+    };
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-group-geometry:'))).toBe(true);
+  });
+
+  it('flags a column with w ≤ 0 or h ≤ 0', () => {
+    for (const bad of [
+      { x: 0, y: 0, w: 0, h: 400 },
+      { x: 0, y: 0, w: 240, h: -1 },
+    ]) {
+      const doc = validDoc();
+      doc.groups = { c1: { id: 'c1', name: 'To Do', role: 'kanban', ...bad } };
+      const errs = validateDoc(doc);
+      expect(errs.some((e) => e.startsWith('bad-group-geometry:'))).toBe(true);
+    }
+  });
+
+  it('flags geometry on a group with no role (a plain frame derives its rect)', () => {
+    const doc = validDoc();
+    doc.groups = { g1: { id: 'g1', name: 'g', x: 0, y: 0, w: 100, h: 100 } };
+    const errs = validateDoc(doc);
+    expect(errs.some((e) => e.startsWith('bad-group-geometry:'))).toBe(true);
+  });
+
+  it('a column whose members carry groupId stays valid (membership is ordinary)', () => {
+    const doc = validDoc();
+    doc.groups = {
+      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+    };
+    doc.nodes.n1!.groupId = 'c1';
+    expect(validateDoc(doc)).toEqual([]);
+  });
+});
