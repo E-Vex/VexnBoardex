@@ -6,7 +6,12 @@
  * patch. IDs come from the caller (D-11).
  */
 
-import type { Command, NodeContentPatch, EdgeContentPatch, GroupContentPatch } from './types';
+import type {
+  Command,
+  NodeContentPatch,
+  EdgeContentPatch,
+  GroupContentPatch,
+} from './types';
 import type { Doc, Group } from './types';
 import type { EntityChange, Patch } from './types';
 import type { Anchor, Edge, EdgeRoute, Id, Node } from './types';
@@ -245,7 +250,9 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
     throw new CommandError('node.update: patch.color is not a string');
   }
   if (patch.tags !== undefined && !isStringArray(patch.tags)) {
-    throw new CommandError('node.update: patch.tags is not an array of strings');
+    throw new CommandError(
+      'node.update: patch.tags is not an array of strings',
+    );
   }
   if (patch.shape !== undefined && !VALID_SHAPES.has(patch.shape)) {
     throw new CommandError(`node.update: invalid patch.shape "${patch.shape}"`);
@@ -303,12 +310,21 @@ function compileUpdate(doc: Doc, ids: Id[], patch: NodeContentPatch): Patch {
  * must exist; x/y/w/h must be finite with w > 0 and h > 0 (D-24); a resize
  * that changes nothing compiles to an empty patch.
  */
-function compileResize(doc: Doc, id: Id, x: number, y: number, w: number, h: number): Patch {
+function compileResize(
+  doc: Doc,
+  id: Id,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): Patch {
   if (!Object.prototype.hasOwnProperty.call(doc.nodes, id)) {
     throw new CommandError(`node.resize: unknown id "${id}"`);
   }
-  if (!Number.isFinite(x)) throw new CommandError('node.resize: x is not finite');
-  if (!Number.isFinite(y)) throw new CommandError('node.resize: y is not finite');
+  if (!Number.isFinite(x))
+    throw new CommandError('node.resize: x is not finite');
+  if (!Number.isFinite(y))
+    throw new CommandError('node.resize: y is not finite');
   if (!Number.isFinite(w) || w <= 0) {
     throw new CommandError('node.resize: w is not finite or ≤ 0');
   }
@@ -481,7 +497,11 @@ function compileGroupCreate(doc: Doc, group: Group): Patch {
  * document (commands are data, D-22). A patch that changes nothing (or empty
  * ids) compiles to an empty patch — one command, one undo step.
  */
-function compileGroupUpdate(doc: Doc, ids: Id[], patch: GroupContentPatch): Patch {
+function compileGroupUpdate(
+  doc: Doc,
+  ids: Id[],
+  patch: GroupContentPatch,
+): Patch {
   if (patch === null || typeof patch !== 'object') {
     throw new CommandError('group.update: patch is not an object');
   }
@@ -759,7 +779,7 @@ function compileDuplicate(
   offsetX: number | undefined,
   offsetY: number | undefined,
   newIds: Id[],
-  newEdgeIds: Id[]
+  newEdgeIds: Id[],
 ): Patch {
   const ox = offsetX ?? 20;
   const oy = offsetY ?? 20;
@@ -770,7 +790,9 @@ function compileDuplicate(
     throw new CommandError('node.duplicate: offsetY is not finite');
   }
   if (newIds.length !== ids.length) {
-    throw new CommandError('node.duplicate: newIds length must match ids length');
+    throw new CommandError(
+      'node.duplicate: newIds length must match ids length',
+    );
   }
   // Count edges that will be duplicated (edges between duplicated nodes).
   let edgeCount = 0;
@@ -781,7 +803,9 @@ function compileDuplicate(
     }
   }
   if (newEdgeIds.length !== edgeCount) {
-    throw new CommandError('node.duplicate: newEdgeIds length must match number of edges between duplicated nodes');
+    throw new CommandError(
+      'node.duplicate: newEdgeIds length must match number of edges between duplicated nodes',
+    );
   }
 
   // De-duplicate ids (first occurrence wins).
@@ -870,7 +894,11 @@ function compileDuplicate(
  * Compile `node.zOrder`: changes the z-order of the given nodes.
  * Modes: 'front' (to top), 'back' (to bottom), 'forward' (up one), 'backward' (down one).
  */
-function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' | 'backward'): Patch {
+function compileZOrder(
+  doc: Doc,
+  ids: Id[],
+  mode: 'front' | 'back' | 'forward' | 'backward',
+): Patch {
   // De-duplicate ids (first occurrence wins).
   const seen = new Set<Id>();
   const uniqueIds: Id[] = [];
@@ -960,7 +988,11 @@ function compileZOrder(doc: Doc, ids: Id[], mode: 'front' | 'back' | 'forward' |
  * command, one undo step, for any number of edges. Endpoints are NOT
  * editable here: they are structural (`edge.create` / `edge.delete`).
  */
-function compileEdgeUpdate(doc: Doc, ids: Id[], patch: EdgeContentPatch): Patch {
+function compileEdgeUpdate(
+  doc: Doc,
+  ids: Id[],
+  patch: EdgeContentPatch,
+): Patch {
   if (patch.route !== undefined && !VALID_ROUTES.has(patch.route)) {
     throw new CommandError(
       `edge.update: patch.route "${String(patch.route)}" is not one of 'auto' | 'straight' | 'orthogonal'`,
@@ -1134,15 +1166,34 @@ export function compileCommand(doc: Doc, command: Command): Patch {
     case 'node.delete':
       return compileDelete(doc, command.ids);
     case 'node.duplicate':
-      return compileDuplicate(doc, command.ids, command.offsetX, command.offsetY, command.newIds, command.newEdgeIds);
+      return compileDuplicate(
+        doc,
+        command.ids,
+        command.offsetX,
+        command.offsetY,
+        command.newIds,
+        command.newEdgeIds,
+      );
     case 'node.zOrder':
       return compileZOrder(doc, command.ids, command.mode);
     case 'node.update':
       return compileUpdate(doc, command.ids, command.patch);
     case 'node.resize':
-      return compileResize(doc, command.id, command.x, command.y, command.w, command.h);
+      return compileResize(
+        doc,
+        command.id,
+        command.x,
+        command.y,
+        command.w,
+        command.h,
+      );
     case 'group.assign':
-      return compileGroupAssign(doc, command.groupId, command.name, command.ids);
+      return compileGroupAssign(
+        doc,
+        command.groupId,
+        command.name,
+        command.ids,
+      );
     case 'group.unassign':
       return compileGroupUnassign(doc, command.ids);
     case 'group.create':

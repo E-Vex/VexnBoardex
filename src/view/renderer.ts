@@ -21,10 +21,17 @@
 
 import type { Doc, Node, Edge, NodeShape } from '../core/types';
 import { rectContains, rectsIntersect, type Point } from '../core/geometry';
-import { edgePoints, anchorPoint, polylineMidpoint } from '../core/edgeGeometry';
+import {
+  edgePoints,
+  anchorPoint,
+  polylineMidpoint,
+} from '../core/edgeGeometry';
 import { groupFrameRect } from '../core/hitTest';
 import {
   columnClosePoint,
+  columnContentHeight,
+  columnEffectiveRectOf,
+  columnMembers,
   columnRect,
   isColumn,
   KANBAN_HEADER_H,
@@ -79,6 +86,8 @@ import {
   KANBAN_COLUMN_BORDER,
   KANBAN_HEADER_COLOR,
   KANBAN_CLOSE_COLOR,
+  KANBAN_HIGHLIGHT_FILL,
+  KANBAN_HIGHLIGHT_BORDER,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -427,7 +436,10 @@ const HANDLE_ANCHORS: ('top' | 'right' | 'bottom' | 'left')[] = [
 /**
  * Get the world point for a handle anchor on a node rect.
  */
-function getHandlePoint(node: { x: number; y: number; w: number; h: number }, anchor: 'top' | 'right' | 'bottom' | 'left'): { x: number; y: number } {
+function getHandlePoint(
+  node: { x: number; y: number; w: number; h: number },
+  anchor: 'top' | 'right' | 'bottom' | 'left',
+): { x: number; y: number } {
   switch (anchor) {
     case 'top':
       return { x: node.x + node.w / 2, y: node.y };
@@ -518,28 +530,42 @@ function drawResizeHandles(
 
 // ── Kanban columns (T-035) ────────────────────────────────────────────────
 
+/** Drawing options for one kanban column panel (T-037). */
+export interface KanbanColumnStyle {
+  /** Paint the drop-target highlight wash and border (T-037). */
+  highlight: boolean;
+  /** Paint the column name — skipped while the DOM overlay edits it. */
+  drawName: boolean;
+}
+
 /**
  * Draw one kanban column panel in world coordinates (T-035, M9): the
- * group's STORED rect (fixed geometry, not a member bbox) as a solid,
- * softly-filled panel with a header strip (name + divider) and a × close
- * affordance at `columnClosePoint` — the exact point the input layer
- * hit-tests (`columnCloseHit`), so the glyph and its target can never
- * drift apart. The × paints at a constant SCREEN size (/scale, the handle
- * precedent, T-018) so it stays clickable-looking at any zoom.
+ * caller's rect (the column's EFFECTIVE geometry — the stored height grown
+ * to fit its cards, T-037 auto-grow) as a solid, softly-filled panel with
+ * a header strip (name + divider) and a × close affordance at
+ * `columnClosePoint` — the exact point the input layer hit-tests
+ * (`columnCloseHit`), so the glyph and its target can never drift apart.
+ * The × paints at a constant SCREEN size (/scale, the handle precedent,
+ * T-018) so it stays clickable-looking at any zoom. T-037: `style.highlight`
+ * swaps in the accent wash + border (the drop-target highlight), and
+ * `style.drawName === false` leaves the header text to the DOM overlay.
  */
 function drawKanbanColumn(
   ctx: CanvasRenderingContext2D,
   rect: { x: number; y: number; w: number; h: number },
   name: string,
   scale: number,
+  style: KanbanColumnStyle,
 ): void {
   // The panel.
   ctx.beginPath();
   roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
-  ctx.fillStyle = KANBAN_COLUMN_FILL;
+  ctx.fillStyle = style.highlight ? KANBAN_HIGHLIGHT_FILL : KANBAN_COLUMN_FILL;
   ctx.fill();
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = KANBAN_COLUMN_BORDER;
+  ctx.strokeStyle = style.highlight
+    ? KANBAN_HIGHLIGHT_BORDER
+    : KANBAN_COLUMN_BORDER;
   ctx.stroke();
 
   // The header divider.
@@ -550,8 +576,8 @@ function drawKanbanColumn(
   ctx.stroke();
 
   // The column name, vertically centred in the header (the same text LOD
-  // the group frames use).
-  if (FONT_SIZE * scale >= MIN_TEXT_SIZE) {
+  // the group frames use). Skipped while the overlay edits it (T-037).
+  if (style.drawName && FONT_SIZE * scale >= MIN_TEXT_SIZE) {
     ctx.font = `600 15px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -572,6 +598,36 @@ function drawKanbanColumn(
   ctx.stroke();
 }
 
+/**
+ * Draw the 3 column resize affordances (T-037): squares centred on the
+ * drawn rect's right-edge midpoint (width), bottom-edge midpoint (height)
+ * and bottom-right corner (both) — always present, like the × affordance;
+ * cards are inset so they never sit under them. World coordinates with
+ * /scale sizes (the node-handle metrics, T-021) — constant on screen at
+ * any zoom and DPR.
+ */
+function drawColumnResizeHandles(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; w: number; h: number },
+  scale: number,
+): void {
+  const half = RESIZE_HANDLE_SIZE / scale / 2;
+  const points: [number, number][] = [
+    [rect.x + rect.w, rect.y + rect.h / 2], // right edge midpoint
+    [rect.x + rect.w / 2, rect.y + rect.h], // bottom edge midpoint
+    [rect.x + rect.w, rect.y + rect.h], // bottom-right corner
+  ];
+  ctx.lineWidth = RESIZE_HANDLE_BORDER_WIDTH / scale;
+  ctx.fillStyle = RESIZE_HANDLE_COLOR;
+  ctx.strokeStyle = RESIZE_HANDLE_BORDER_COLOR;
+  for (const [cx, cy] of points) {
+    ctx.beginPath();
+    ctx.rect(cx - half, cy - half, half * 2, half * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
 // ── Connection preview drawing (T-011) ──────────────────────────────────────
 
 /**
@@ -590,7 +646,12 @@ function drawConnectPreview(
   const fromNode = doc.nodes[preview.fromNode];
   if (!fromNode) return;
 
-  const fromRect = { x: fromNode.x, y: fromNode.y, w: fromNode.w, h: fromNode.h };
+  const fromRect = {
+    x: fromNode.x,
+    y: fromNode.y,
+    w: fromNode.w,
+    h: fromNode.h,
+  };
   // The from point is the exact handle the gesture started from — no guessing.
   const fromPoint = anchorPoint(fromRect, preview.fromAnchor, preview.to);
 
@@ -642,6 +703,10 @@ export function renderBoard(
     boxSelect: null,
     mode: 'select',
     edgeSelection: [],
+    columnDrag: null,
+    columnResize: null,
+    kanbanDropTarget: null,
+    editingColumn: null,
   },
 ): void {
   const { width, height } = viewport;
@@ -692,14 +757,47 @@ export function renderBoard(
   // another world transform (a nested transform would apply the camera
   // twice). T-035: a KANBAN COLUMN paints its own panel instead — fixed
   // geometry, header, × — through the same pass, so columns also sit
-  // beneath edges and cards.
+  // beneath edges and cards. T-037: the panel is the column's EFFECTIVE
+  // rect (auto-grow); a column drag/resize preview (UI state, I-04)
+  // offsets/stretches it; the drop-target column paints the accent
+  // highlight; and the always-on resize affordances sit on its edges.
   const m = cameraToMatrix(camera);
+  const columnDrag = ui.columnDrag;
+  const columnResize = ui.columnResize;
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const [groupId, group] of Object.entries(doc.groups)) {
     if (isColumn(group)) {
-      const rect = columnRect(group);
-      if (rect !== null) drawKanbanColumn(ctx, rect, group.name, m.scale);
+      const members = columnMembers(doc, groupId);
+      // The resize preview replaces the STORED rect (top-left anchored,
+      // minimums clamped); the effective height still grows for the cards
+      // — the visible panel never clips them, mid-gesture or not.
+      const preview =
+        columnResize !== null && columnResize.id === groupId
+          ? columnResize
+          : null;
+      const stored =
+        preview !== null
+          ? { x: preview.x, y: preview.y, w: preview.w, h: preview.h }
+          : columnRect(group);
+      if (stored !== null) {
+        const content = columnContentHeight(members);
+        const base = columnEffectiveRectOf(group, members);
+        const h = Math.max(
+          preview !== null ? preview.h : (base?.h ?? stored.h),
+          content,
+        );
+        const dx =
+          columnDrag !== null && columnDrag.id === groupId ? columnDrag.dx : 0;
+        const dy =
+          columnDrag !== null && columnDrag.id === groupId ? columnDrag.dy : 0;
+        const rect = { x: stored.x + dx, y: stored.y + dy, w: stored.w, h };
+        drawKanbanColumn(ctx, rect, group.name, m.scale, {
+          highlight: ui.kanbanDropTarget === groupId,
+          drawName: ui.editingColumn !== groupId,
+        });
+        drawColumnResizeHandles(ctx, rect, m.scale);
+      }
       continue;
     }
     const rect = groupFrameRect(doc, groupId);
@@ -735,17 +833,37 @@ export function renderBoard(
     ? { ids: new Set(ui.drag.ids), dx: ui.drag.dx, dy: ui.drag.dy }
     : null;
   // A resize preview overrides the node's rect entirely (T-021): edges
-  // must follow the previewed geometry, exactly like a drag does.
+  // must follow the previewed geometry, exactly like a drag does. T-037:
+  // a column gesture's preview does too — a column drag offsets its member
+  // cards, a column resize stretches them — so edges glued to those cards
+  // follow along (I-01: geometry is always derived from node rects).
   const resizePreview = ui.resize;
   const rectOf = (id: string) => {
     const node = doc.nodes[id];
     if (!node) return undefined;
     if (resizePreview !== null && resizePreview.id === id) {
-      return { x: resizePreview.x, y: resizePreview.y, w: resizePreview.w, h: resizePreview.h };
+      return {
+        x: resizePreview.x,
+        y: resizePreview.y,
+        w: resizePreview.w,
+        h: resizePreview.h,
+      };
     }
     const isDragged = dragPreview !== null && dragPreview.ids.has(id);
-    const dx = isDragged ? dragPreview.dx : 0;
-    const dy = isDragged ? dragPreview.dy : 0;
+    let dx = isDragged ? dragPreview.dx : 0;
+    let dy = isDragged ? dragPreview.dy : 0;
+    if (!isDragged && columnDrag !== null && node.groupId === columnDrag.id) {
+      dx = columnDrag.dx;
+      dy = columnDrag.dy;
+    }
+    if (columnResize !== null && node.groupId === columnResize.id) {
+      return {
+        x: columnResize.x + KANBAN_PADDING + dx,
+        y: node.y + dy,
+        w: columnResize.w - 2 * KANBAN_PADDING,
+        h: node.h,
+      };
+    }
     return { x: node.x + dx, y: node.y + dy, w: node.w, h: node.h };
   };
   const selectedEdges = new Set(ui.edgeSelection);
@@ -807,18 +925,32 @@ export function renderBoard(
     if (node === undefined) continue; // defensive: order must be a permutation
     // Drag preview offset (R5) and resize preview rect (T-021): drawn at the
     // previewed geometry; the document is not touched. Culling uses the
-    // rect actually drawn.
+    // rect actually drawn. T-037: a column gesture's preview moves or
+    // stretches the column's member cards the same way (I-04).
     const isDragged = draggedIds !== null && draggedIds.has(id);
-    const dx = isDragged ? dragDx : 0;
-    const dy = isDragged ? dragDy : 0;
+    let dx = isDragged ? dragDx : 0;
+    let dy = isDragged ? dragDy : 0;
+    if (!isDragged && columnDrag !== null && node.groupId === columnDrag.id) {
+      dx = columnDrag.dx;
+      dy = columnDrag.dy;
+    }
     // A resize preview replaces the node's rect wholesale (T-021).
     const resized =
       ui.resize !== null && ui.resize.id === id
         ? { x: ui.resize.x, y: ui.resize.y, w: ui.resize.w, h: ui.resize.h }
         : null;
-    const x = resized !== null ? resized.x : node.x + dx;
+    // A column resize preview re-fits the member cards (T-037): inset x and
+    // the preview inner width — exactly what the commit will set.
+    const columnFitted =
+      columnResize !== null && node.groupId === columnResize.id
+        ? {
+            x: columnResize.x + KANBAN_PADDING,
+            w: columnResize.w - 2 * KANBAN_PADDING,
+          }
+        : null;
+    const x = resized !== null ? resized.x : (columnFitted?.x ?? node.x) + dx;
     const y = resized !== null ? resized.y : node.y + dy;
-    const w = resized !== null ? resized.w : node.w;
+    const w = resized !== null ? resized.w : (columnFitted?.w ?? node.w);
     const h = resized !== null ? resized.h : node.h;
     // Culling (R6): skip nodes whose drawn rect does not intersect the
     // visible rect — a selected node is culled like any other (R5).
@@ -832,7 +964,9 @@ export function renderBoard(
       ctx.globalAlpha = 0.25;
       drawNode(
         ctx,
-        resized !== null ? { ...node, x, y, w, h } : node,
+        resized !== null || columnFitted !== null
+          ? { ...node, x, y, w, h }
+          : node,
         m.scale,
         dx,
         dy,
@@ -842,7 +976,9 @@ export function renderBoard(
     } else {
       drawNode(
         ctx,
-        resized !== null ? { ...node, x, y, w, h } : node,
+        resized !== null || columnFitted !== null
+          ? { ...node, x, y, w, h }
+          : node,
         m.scale,
         dx,
         dy,

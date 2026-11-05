@@ -166,7 +166,10 @@ export function hitTestResizeHandles(
     const cScreen = worldToScreen(camera, { x: wx, y: wy });
     const dx = pointScreen.x - cScreen.x;
     const dy = pointScreen.y - cScreen.y;
-    if (dx * dx + dy * dy <= RESIZE_HANDLE_HIT_RADIUS * RESIZE_HANDLE_HIT_RADIUS) {
+    if (
+      dx * dx + dy * dy <=
+      RESIZE_HANDLE_HIT_RADIUS * RESIZE_HANDLE_HIT_RADIUS
+    ) {
       return { type: 'resize', id, corner };
     }
   }
@@ -219,7 +222,10 @@ export function hitTestWithHandles(
 }
 
 /** Get the world point for a handle anchor on a rect. */
-function getHandleWorldPoint(rect: { x: number; y: number; w: number; h: number }, anchor: Anchor): Point {
+function getHandleWorldPoint(
+  rect: { x: number; y: number; w: number; h: number },
+  anchor: Anchor,
+): Point {
   switch (anchor) {
     case 'top':
       return { x: rect.x + rect.w / 2, y: rect.y };

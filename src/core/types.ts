@@ -137,8 +137,19 @@ export type Command =
   | { type: 'node.create'; node: Node }
   | { type: 'node.move'; ids: Id[]; dx: number; dy: number }
   | { type: 'node.delete'; ids: Id[] }
-  | { type: 'node.duplicate'; ids: Id[]; offsetX?: number; offsetY?: number; newIds: Id[]; newEdgeIds: Id[] }
-  | { type: 'node.zOrder'; ids: Id[]; mode: 'front' | 'back' | 'forward' | 'backward' }
+  | {
+      type: 'node.duplicate';
+      ids: Id[];
+      offsetX?: number;
+      offsetY?: number;
+      newIds: Id[];
+      newEdgeIds: Id[];
+    }
+  | {
+      type: 'node.zOrder';
+      ids: Id[];
+      mode: 'front' | 'back' | 'forward' | 'backward';
+    }
   | { type: 'node.update'; ids: Id[]; patch: NodeContentPatch }
   | { type: 'node.resize'; id: Id; x: number; y: number; w: number; h: number }
   | { type: 'group.assign'; groupId: Id; name: string; ids: Id[] }

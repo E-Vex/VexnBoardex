@@ -75,7 +75,12 @@ export function isColumn(group: Group): boolean {
 export function columnRect(group: Group): Rect | null {
   if (!isColumn(group)) return null;
   const { x, y, w, h } = group;
-  if (x === undefined || y === undefined || w === undefined || h === undefined) {
+  if (
+    x === undefined ||
+    y === undefined ||
+    w === undefined ||
+    h === undefined
+  ) {
     return null;
   }
   return { x, y, w, h };
@@ -107,7 +112,10 @@ export function columnContentHeight(cards: Node[]): number {
  * top-left corner never moves (growth extends downward). Null when the
  * group is not a column or its stored geometry is missing (defensive).
  */
-export function columnEffectiveRectOf(group: Group, members: Node[]): Rect | null {
+export function columnEffectiveRectOf(
+  group: Group,
+  members: Node[],
+): Rect | null {
   const stored = columnRect(group);
   if (stored === null) return null;
   const content = columnContentHeight(members);
@@ -154,7 +162,10 @@ export function columnAt(doc: Doc, point: Point): Id | null {
 
 /** The world point at the centre of a column's × close affordance. */
 export function columnClosePoint(rect: Rect): Point {
-  return { x: rect.x + rect.w - KANBAN_PADDING, y: rect.y + KANBAN_HEADER_H / 2 };
+  return {
+    x: rect.x + rect.w - KANBAN_PADDING,
+    y: rect.y + KANBAN_HEADER_H / 2,
+  };
 }
 
 /**
@@ -163,7 +174,11 @@ export function columnClosePoint(rect: Rect): Point {
  * so the target stays comfortably clickable at any zoom — the resize-handle
  * precedent (T-021).
  */
-export function columnCloseHit(doc: Doc, point: Point, zoom: number): Id | null {
+export function columnCloseHit(
+  doc: Doc,
+  point: Point,
+  zoom: number,
+): Id | null {
   if (!Number.isFinite(zoom) || zoom <= 0) return null;
   for (const [id, group] of Object.entries(doc.groups)) {
     if (!isColumn(group)) continue;
@@ -255,7 +270,9 @@ export function columnResizeRect(
   world: Point,
 ): Rect {
   const w =
-    edge === 'bottom' ? orig.w : Math.max(KANBAN_MIN_COLUMN_W, world.x - orig.x);
+    edge === 'bottom'
+      ? orig.w
+      : Math.max(KANBAN_MIN_COLUMN_W, world.x - orig.x);
   const h =
     edge === 'right' ? orig.h : Math.max(KANBAN_MIN_COLUMN_H, world.y - orig.y);
   return { x: orig.x, y: orig.y, w, h };
@@ -323,7 +340,10 @@ export function insertionIndex(others: Node[], centerY: number): number {
 
 /** Per-card `node.move`s for every card whose target differs from its
  * current position — zero-delta cards are skipped (D-22 no-ops). */
-function relayoutMoves(cards: Node[], targets: Map<Id, { x: number; y: number }>): Command[] {
+function relayoutMoves(
+  cards: Node[],
+  targets: Map<Id, { x: number; y: number }>,
+): Command[] {
   const moves: Command[] = [];
   for (const card of cards) {
     const t = targets.get(card.id);
@@ -413,7 +433,8 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
   const dragged = args.ids
     .map((id) => doc.nodes[id])
     .filter((n): n is Node => n !== undefined);
-  if (dragged.length === 0) return { preview: null, target: null, command: plain };
+  if (dragged.length === 0)
+    return { preview: null, target: null, command: plain };
 
   // A regular-group drag never snaps.
   const inRegularGroup = dragged.some((n) => {
@@ -424,7 +445,8 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
   if (inRegularGroup) return { preview: null, target: null, command: plain };
 
   const primary =
-    (args.primaryId !== null ? doc.nodes[args.primaryId] : undefined) ?? dragged[0]!;
+    (args.primaryId !== null ? doc.nodes[args.primaryId] : undefined) ??
+    dragged[0]!;
   const centerX = primary.x + args.dx + primary.w / 2;
   const centerY = primary.y + args.dy + primary.h / 2;
   const targetId = columnAt(doc, { x: centerX, y: centerY });
@@ -448,15 +470,24 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
 
   // Over no column: the raw move; column members leave, sources restack.
   if (targetId === null) {
-    if (columnCards.length === 0) return { preview: null, target: null, command: plain };
+    if (columnCards.length === 0)
+      return { preview: null, target: null, command: plain };
     const commands: Command[] = [
       plain,
-      { type: 'node.setGroup', ids: columnCards.map((n) => n.id), groupId: null },
+      {
+        type: 'node.setGroup',
+        ids: columnCards.map((n) => n.id),
+        groupId: null,
+      },
     ];
     for (const source of sources) {
       commands.push(...closeGaps(doc, source, draggedIds));
     }
-    return { preview: null, target: null, command: { type: 'batch', commands } };
+    return {
+      preview: null,
+      target: null,
+      command: { type: 'batch', commands },
+    };
   }
 
   // Over a column: insert at the drop position and restack.
@@ -469,7 +500,11 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
     .sort(stackSort);
   const index = insertionIndex(others, centerY);
   const draggedSorted = [...dragged].sort(stackSort);
-  const all = [...others.slice(0, index), ...draggedSorted, ...others.slice(index)];
+  const all = [
+    ...others.slice(0, index),
+    ...draggedSorted,
+    ...others.slice(index),
+  ];
   const targets = slotPositions(rect, all);
 
   const commands: Command[] = [...relayoutMoves(all, targets)];
@@ -505,7 +540,11 @@ export function planKanbanDrop(doc: Doc, args: KanbanDropArgs): KanbanDropPlan {
  * when the point is outside every column: the caller falls back to the
  * ordinary centred creation (D-28, unchanged).
  */
-export function planKanbanCreate(doc: Doc, world: Point, id: Id): Command | null {
+export function planKanbanCreate(
+  doc: Doc,
+  world: Point,
+  id: Id,
+): Command | null {
   const columnId = columnAt(doc, world);
   if (columnId === null) return null;
   const rect = columnRect(doc.groups[columnId]!);
@@ -547,7 +586,8 @@ export function planKanbanBoard(doc: Doc, anchor: Point, ids: Id[]): Command {
       `planKanbanBoard: needs ${KANBAN_BOARD_COLUMNS.length} ids, got ${ids.length}`,
     );
   }
-  const boardW = KANBAN_BOARD_COLUMNS.length * KANBAN_COLUMN_W +
+  const boardW =
+    KANBAN_BOARD_COLUMNS.length * KANBAN_COLUMN_W +
     (KANBAN_BOARD_COLUMNS.length - 1) * KANBAN_COLUMN_GAP;
   let x0 = anchor.x - boardW / 2;
   let y0 = anchor.y - KANBAN_COLUMN_H / 2;
@@ -585,7 +625,12 @@ export function planKanbanBoard(doc: Doc, anchor: Point, ids: Id[]): Command {
  * behind outside the frame they belong to. A (0, 0) delta compiles to an
  * empty patch (D-22). Pure; the caller dispatches on pointer-up (I-04).
  */
-export function planColumnMove(doc: Doc, columnId: Id, dx: number, dy: number): Command {
+export function planColumnMove(
+  doc: Doc,
+  columnId: Id,
+  dx: number,
+  dy: number,
+): Command {
   const group = doc.groups[columnId];
   if (group === undefined || !isColumn(group)) {
     throw new Error(`planColumnMove: unknown column "${columnId}"`);

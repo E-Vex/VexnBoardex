@@ -56,6 +56,31 @@ export interface ResizePreview {
 }
 
 /**
+ * A column move in progress (T-037): the column and the world delta of the
+ * gesture. A preview only — the document is untouched until pointer-up
+ * (I-04); the renderer offsets the column's panel AND its member cards.
+ */
+export interface ColumnDragPreview {
+  id: Id;
+  dx: number;
+  dy: number;
+}
+
+/**
+ * A column resize preview (T-037): the STORED rect the gesture is heading
+ * for (top-left anchored, minimums clamped). The renderer paints the panel
+ * at its EFFECTIVE size — max(preview h, content) — and stretches the
+ * member cards to the preview inner width. Preview only (I-04).
+ */
+export interface ColumnResizePreview {
+  id: Id;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
  * The interaction mode (T-029, M9). `select` is the free-form board;
  * `mindmap` layers the tree behaviour (Tab = child, Enter = sibling) on the
  * SAME document model (D-14). UI-only — never saved, never in history
@@ -89,6 +114,18 @@ export interface UiState {
   mode: Mode;
   /** The selected edge ids (T-033). UI-only — never saved (I-05). */
   edgeSelection: Id[];
+  /** A column move gesture preview (T-037). UI-only — never saved (I-05). */
+  columnDrag: ColumnDragPreview | null;
+  /** A column resize gesture preview (T-037). UI-only — never saved (I-05). */
+  columnResize: ColumnResizePreview | null;
+  /**
+   * The kanban column a card drag is currently over (T-037): the renderer
+   * highlights it as the drop target. UI-only — never saved (I-05); null
+   * whenever no snap-able drag is in flight.
+   */
+  kanbanDropTarget: Id | null;
+  /** The column whose name is edited in the DOM overlay (T-037). */
+  editingColumn: Id | null;
 }
 
 export interface UiStore {
@@ -112,6 +149,15 @@ export interface UiStore {
   setBoxSelect(rect: BoxSelectRect | null): void;
   /** Replace the interaction mode (T-029). No notification when equal. */
   setMode(mode: Mode): void;
+  /** Replace the column drag preview (T-037). No notification when equal. */
+  setColumnDrag(drag: ColumnDragPreview | null): void;
+  /** Replace the column resize preview (T-037). No notification when equal. */
+  setColumnResize(resize: ColumnResizePreview | null): void;
+  /** Replace the kanban drop-target highlight (T-037). No notification when
+   * the id is unchanged. */
+  setKanbanDropTarget(id: Id | null): void;
+  /** Set the column whose name is edited (T-037). No notification when equal. */
+  setEditingColumn(id: Id | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
   subscribe(fn: (state: UiState) => void): () => void;
 }
@@ -149,10 +195,35 @@ function sameConnect(
 }
 
 /** True when two box-select rects are equal. */
-function sameBoxSelect(a: BoxSelectRect | null, b: BoxSelectRect | null): boolean {
+function sameBoxSelect(
+  a: BoxSelectRect | null,
+  b: BoxSelectRect | null,
+): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
+/** True when two column drag previews are equal (id, dx, dy) (T-037). */
+function sameColumnDrag(
+  a: ColumnDragPreview | null,
+  b: ColumnDragPreview | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.id === b.id && a.dx === b.dx && a.dy === b.dy;
+}
+
+/** True when two column resize previews are equal (T-037). */
+function sameColumnResize(
+  a: ColumnResizePreview | null,
+  b: ColumnResizePreview | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return (
+    a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+  );
 }
 
 /** True when two UI states are equal. */
@@ -166,7 +237,11 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameIds(a.tagFilter, b.tagFilter) &&
     sameBoxSelect(a.boxSelect, b.boxSelect) &&
     a.mode === b.mode &&
-    sameIds(a.edgeSelection, b.edgeSelection)
+    sameIds(a.edgeSelection, b.edgeSelection) &&
+    sameColumnDrag(a.columnDrag, b.columnDrag) &&
+    sameColumnResize(a.columnResize, b.columnResize) &&
+    a.kanbanDropTarget === b.kanbanDropTarget &&
+    a.editingColumn === b.editingColumn
   );
 }
 
@@ -174,13 +249,16 @@ function sameUiState(a: UiState, b: UiState): boolean {
 function sameResize(a: ResizePreview | null, b: ResizePreview | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
-  return a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+  return (
+    a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+  );
 }
 
 /**
  * Create a UI store initialised to all-empty UI state
  * `{ selection: [], drag: null, connect: null, editing: null, resize: null,
- *    boxSelect: null, mode: 'select', edgeSelection: [] }`.
+ *    boxSelect: null, mode: 'select', edgeSelection: [], columnDrag: null,
+ *    columnResize: null, kanbanDropTarget: null, editingColumn: null }`.
  */
 export function createUiStore(): UiStore {
   let current: UiState = {
@@ -193,6 +271,10 @@ export function createUiStore(): UiStore {
     boxSelect: null,
     mode: 'select',
     edgeSelection: [],
+    columnDrag: null,
+    columnResize: null,
+    kanbanDropTarget: null,
+    editingColumn: null,
   };
   const subscribers = new Set<(state: UiState) => void>();
 
@@ -236,6 +318,18 @@ export function createUiStore(): UiStore {
     },
     setMode(mode: Mode) {
       patch({ mode });
+    },
+    setColumnDrag(drag: ColumnDragPreview | null) {
+      patch({ columnDrag: drag });
+    },
+    setColumnResize(resize: ColumnResizePreview | null) {
+      patch({ columnResize: resize });
+    },
+    setKanbanDropTarget(id: Id | null) {
+      patch({ kanbanDropTarget: id });
+    },
+    setEditingColumn(id: Id | null) {
+      patch({ editingColumn: id });
     },
     subscribe(fn: (state: UiState) => void): () => void {
       subscribers.add(fn);
