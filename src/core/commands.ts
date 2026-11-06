@@ -490,12 +490,17 @@ function compileGroupCreate(doc: Doc, group: Group): Patch {
 
 /**
  * Compile `group.update` (T-037, M9 — kanban column polish): apply a content
- * patch (name, and for columns the stored geometry) to every listed group.
- * Unknown ids throw; invalid patch values throw; the MERGED group must pass
- * `groupViolations` — a plain frame given geometry, or a column left with
- * incomplete/non-positive geometry, throws instead of corrupting the
- * document (commands are data, D-22). A patch that changes nothing (or empty
- * ids) compiles to an empty patch — one command, one undo step.
+ * patch (name, and for columns the stored geometry and collapse flag) to
+ * every listed group. Unknown ids throw; invalid patch values throw; the
+ * MERGED group must pass `groupViolations` — a plain frame given geometry
+ * or a collapse flag, or a column left with incomplete/non-positive
+ * geometry, throws instead of corrupting the document (commands are data,
+ * D-22). A patch that changes nothing (or empty ids) compiles to an empty
+ * patch — one command, one undo step.
+ *
+ * T-039: `collapsed` normalises — `true` sets the flag, `false` REMOVES it
+ * (absent is the expanded default, I-08), so files never carry a
+ * meaningless `false` and a no-op expand compiles to an empty patch.
  */
 function compileGroupUpdate(
   doc: Doc,
@@ -513,6 +518,10 @@ function compileGroupUpdate(
     if (value !== undefined && !Number.isFinite(value)) {
       throw new CommandError(`group.update: patch.${key} is not finite`);
     }
+  }
+  // T-039: the collapse flag is a boolean when present (commands are data).
+  if (patch.collapsed !== undefined && typeof patch.collapsed !== 'boolean') {
+    throw new CommandError('group.update: patch.collapsed is not a boolean');
   }
 
   // De-duplicate ids (first occurrence wins).
@@ -546,6 +555,14 @@ function compileGroupUpdate(
       ...(patch.w !== undefined ? { w: patch.w } : {}),
       ...(patch.h !== undefined ? { h: patch.h } : {}),
     };
+    // T-039: `collapsed: false` is the expanded DEFAULT — stored as absent
+    // (I-08), exactly like the loader normalises it. A `true` sets the
+    // flag; a `false` strips it, even a legacy one.
+    if (patch.collapsed === true) {
+      after.collapsed = true;
+    } else if (patch.collapsed === false) {
+      delete after.collapsed;
+    }
     // The merged group must stay valid (D-24 rules via groupViolations) —
     // a no-op patch skips this naturally (after === before).
     const violations = groupViolations(after, id);
@@ -557,7 +574,10 @@ function compileGroupUpdate(
       after.x === before.x &&
       after.y === before.y &&
       after.w === before.w &&
-      after.h === before.h
+      after.h === before.h &&
+      // T-039: only the PRESENCE of the flag matters — `false` (a legacy
+      // hand-built value) and `undefined` both mean "expanded".
+      (after.collapsed === true) === (before.collapsed === true)
     ) {
       continue;
     }
