@@ -34,6 +34,7 @@ import {
   createUiStore,
   pruneSelection,
   pruneEdgeSelection,
+  pruneColumnSelection,
 } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import {
@@ -113,6 +114,8 @@ store.subscribe(() => {
 // and HUD refresh. Pruning first, so the HUD never shows a stale count.
 // Edge selections prune the same way (T-033): a deleted node cascades its
 // edges away (I-09), so the edge selection must never keep a stale id.
+// The selected column prunes the same way (T-040): the × affordance can
+// delete it, and F2 must never open on a group that is gone.
 docStore.subscribe((doc) => {
   const selection = uiStore.get().selection;
   const pruned = pruneSelection(selection, doc);
@@ -123,6 +126,11 @@ docStore.subscribe((doc) => {
   const prunedEdges = pruneEdgeSelection(edgeSelection, doc);
   if (prunedEdges !== edgeSelection) {
     uiStore.setEdgeSelection(prunedEdges);
+  }
+  const columnSelection = uiStore.get().columnSelection;
+  const prunedColumn = pruneColumnSelection(columnSelection, doc);
+  if (prunedColumn !== columnSelection) {
+    uiStore.setColumnSelection(prunedColumn);
   }
   host.requestRender();
   refreshHud();

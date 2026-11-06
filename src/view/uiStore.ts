@@ -126,6 +126,17 @@ export interface UiState {
   kanbanDropTarget: Id | null;
   /** The column whose name is edited in the DOM overlay (T-037). */
   editingColumn: Id | null;
+  /**
+   * The SELECTED kanban column (T-040, M9) — the F2 rename target. Set by
+   * a header press (alongside the members' selection, the T-024 frame
+   * behaviour); cleared by every machine-driven selection (a node, an
+   * edge, a marquee — the mutual-exclusion rule the node and edge
+   * selections follow) and pruned when its group disappears. UI-only —
+   * never saved, never in history (I-05). The edgeSelection precedent:
+   * kept SEPARATE from the node `selection` so node logic (drag, delete,
+   * inspector sections) never trips over a group id.
+   */
+  columnSelection: Id | null;
 }
 
 export interface UiStore {
@@ -158,6 +169,9 @@ export interface UiStore {
   setKanbanDropTarget(id: Id | null): void;
   /** Set the column whose name is edited (T-037). No notification when equal. */
   setEditingColumn(id: Id | null): void;
+  /** Set the selected column — the F2 target (T-040). No notification when
+   * the id is unchanged. */
+  setColumnSelection(id: Id | null): void;
   /** Subscribe to UI state changes. Returns an unsubscribe function. */
   subscribe(fn: (state: UiState) => void): () => void;
 }
@@ -241,7 +255,8 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameColumnDrag(a.columnDrag, b.columnDrag) &&
     sameColumnResize(a.columnResize, b.columnResize) &&
     a.kanbanDropTarget === b.kanbanDropTarget &&
-    a.editingColumn === b.editingColumn
+    a.editingColumn === b.editingColumn &&
+    a.columnSelection === b.columnSelection
   );
 }
 
@@ -258,7 +273,8 @@ function sameResize(a: ResizePreview | null, b: ResizePreview | null): boolean {
  * Create a UI store initialised to all-empty UI state
  * `{ selection: [], drag: null, connect: null, editing: null, resize: null,
  *    boxSelect: null, mode: 'select', edgeSelection: [], columnDrag: null,
- *    columnResize: null, kanbanDropTarget: null, editingColumn: null }`.
+ *    columnResize: null, kanbanDropTarget: null, editingColumn: null,
+ *    columnSelection: null }`.
  */
 export function createUiStore(): UiStore {
   let current: UiState = {
@@ -275,6 +291,7 @@ export function createUiStore(): UiStore {
     columnResize: null,
     kanbanDropTarget: null,
     editingColumn: null,
+    columnSelection: null,
   };
   const subscribers = new Set<(state: UiState) => void>();
 
@@ -331,6 +348,9 @@ export function createUiStore(): UiStore {
     setEditingColumn(id: Id | null) {
       patch({ editingColumn: id });
     },
+    setColumnSelection(id: Id | null) {
+      patch({ columnSelection: id });
+    },
     subscribe(fn: (state: UiState) => void): () => void {
       subscribers.add(fn);
       return () => {
@@ -363,4 +383,21 @@ export function pruneEdgeSelection(edgeSelection: Id[], doc: Doc): Id[] {
     Object.prototype.hasOwnProperty.call(doc.edges, id),
   );
   return kept.length === edgeSelection.length ? edgeSelection : kept;
+}
+
+/**
+ * Prune the selected column to the group that still exists in `doc` (T-040,
+ * the `pruneSelection` rule): deleting a column (the × affordance) must
+ * never leave a stale rename target behind — F2 would open the overlay on
+ * a group that is no longer there. Pure: returns the input id itself when
+ * it survives, null when it does not (or already was null).
+ */
+export function pruneColumnSelection(
+  columnSelection: Id | null,
+  doc: Doc,
+): Id | null {
+  if (columnSelection === null) return null;
+  return Object.prototype.hasOwnProperty.call(doc.groups, columnSelection)
+    ? columnSelection
+    : null;
 }
