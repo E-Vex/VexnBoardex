@@ -34,6 +34,7 @@ import {
   createUiStore,
   pruneSelection,
   pruneEdgeSelection,
+  pruneColumnSelection,
 } from './view/uiStore';
 import { createAutosaver, loadAutosave, clearAutosave } from './io/autosave';
 import {
@@ -113,6 +114,8 @@ store.subscribe(() => {
 // and HUD refresh. Pruning first, so the HUD never shows a stale count.
 // Edge selections prune the same way (T-033): a deleted node cascades its
 // edges away (I-09), so the edge selection must never keep a stale id.
+// The selected column prunes the same way (T-040): the × affordance can
+// delete it, and F2 must never open on a group that is gone.
 docStore.subscribe((doc) => {
   const selection = uiStore.get().selection;
   const pruned = pruneSelection(selection, doc);
@@ -123,6 +126,11 @@ docStore.subscribe((doc) => {
   const prunedEdges = pruneEdgeSelection(edgeSelection, doc);
   if (prunedEdges !== edgeSelection) {
     uiStore.setEdgeSelection(prunedEdges);
+  }
+  const columnSelection = uiStore.get().columnSelection;
+  const prunedColumn = pruneColumnSelection(columnSelection, doc);
+  if (prunedColumn !== columnSelection) {
+    uiStore.setColumnSelection(prunedColumn);
   }
   host.requestRender();
   refreshHud();
@@ -280,6 +288,20 @@ window.addEventListener('keydown', (e) => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const shift = e.shiftKey;
 
+  // T-040: F2 renames the SELECTED COLUMN (Explorer semantics: F2 is
+  // "rename"). Checked before the node branch — a header press selects the
+  // members AND the column, and the tinted header is the rename target the
+  // user sees; to F2 a card, click the card itself (the machine's node
+  // selection clears the column selection). Enter keeps its T-020
+  // node-editor meaning (and the mind-map cadence owns it there).
+  if (e.key === 'F2' && !mod) {
+    const columnId = uiStore.get().columnSelection;
+    if (columnId !== null && !textEditor.isOpen()) {
+      e.preventDefault();
+      textEditor.editColumn(columnId);
+      return;
+    }
+  }
   // Enter / F2 with exactly one node selected opens the text editor (T-020).
   // In mind-map mode plain Enter grows a sibling instead (T-029) — the
   // mind-map handler owns Enter; F2 and double-click still open the editor.
