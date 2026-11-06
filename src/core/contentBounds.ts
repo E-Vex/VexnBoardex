@@ -10,6 +10,7 @@
 
 import type { Rect } from './geometry';
 import { groupFrameRect } from './hitTest';
+import { hiddenByCollapse } from './kanban';
 import type { Doc } from './types';
 
 /** Grow `acc` (min/max corners) to include `r`. */
@@ -37,6 +38,9 @@ export function contentBounds(doc: Doc): Rect | null {
   };
 
   for (const node of Object.values(doc.nodes)) {
+    // T-039: a card of a collapsed column is not painted, so it does not
+    // bound the export — the rail (via its group frame) does.
+    if (hiddenByCollapse(doc, node)) continue;
     include(acc, { x: node.x, y: node.y, w: node.w, h: node.h });
   }
 

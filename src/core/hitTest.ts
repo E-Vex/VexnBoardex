@@ -11,7 +11,13 @@ import { rectContains } from './geometry';
 import type { Doc, Id, Anchor } from './types';
 import type { Point, Rect } from './geometry';
 import { edgePoints, nodeRect, polylineDistance } from './edgeGeometry';
-import { columnEffectiveRectOf, columnMembers, isColumn } from './kanban';
+import {
+  columnEffectiveRectOf,
+  columnMembers,
+  edgeHiddenByCollapse,
+  hiddenByCollapse,
+  isColumn,
+} from './kanban';
 
 /** Camera shape used for coordinate conversion (matches view/camera.ts). */
 type Camera = { x: number; y: number; zoom: number };
@@ -107,13 +113,17 @@ export function groupFrameRect(
 /**
  * The id of the top-most node whose rect contains `point`, or `null` when no
  * node does (R1). Later entries in `doc.order` win: they are drawn on top
- * (D-21), so they are hit first.
+ * (D-21), so they are hit first. T-039: a card of a COLLAPSED column is
+ * hidden, and hidden cards are not clickable — the painted board and the
+ * clickable board are the same board (I-04's preview rule, applied to
+ * collapse).
  */
 export function hitTest(doc: Doc, point: Point): Id | null {
   for (let i = doc.order.length - 1; i >= 0; i--) {
     const id = doc.order[i]!;
     const node = doc.nodes[id];
     if (node === undefined) continue; // defensive: order must be a permutation
+    if (hiddenByCollapse(doc, node)) continue; // T-039
     if (rectContains({ x: node.x, y: node.y, w: node.w, h: node.h }, point)) {
       return id;
     }
@@ -199,6 +209,9 @@ export function hitTestWithHandles(
     if (!selected.has(id)) continue;
     const node = doc.nodes[id];
     if (node === undefined) continue;
+    // T-039: a hidden card's handles are not painted either (it may sit in
+    // the selection via Ctrl+A) — the painted board is the clickable board.
+    if (hiddenByCollapse(doc, node)) continue;
 
     const rect = { x: node.x, y: node.y, w: node.w, h: node.h };
 
@@ -271,6 +284,9 @@ export function edgeAt(
   let bestId: Id | null = null;
   let bestDist = Infinity;
   for (const [id, edge] of Object.entries(doc.edges)) {
+    // T-039: an edge touching a hidden card hides with it — a hidden edge
+    // is not clickable either.
+    if (edgeHiddenByCollapse(doc, edge)) continue;
     const pts = edgePoints(edge, rectOf);
     if (pts === null) continue; // a dangling edge has no polyline to hit
     const d = polylineDistance(pts, point);

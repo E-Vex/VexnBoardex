@@ -19,6 +19,11 @@
  * - T-037: the column's EFFECTIVE rect (the stored height grown to fit its
  *   cards — auto-grow), the header/resize affordance hit-tests, and the
  *   column move/resize plans (ONE batch each, cards follow the column).
+ * - T-039: the COLLAPSED state — a collapsed column's effective rect is its
+ *   RAIL (a narrow strip at the stored top-left, no auto-grow), its member
+ *   cards and their edges are hidden (a derived fact every layer sees
+ *   through `hiddenByCollapse`/`edgeHiddenByCollapse`), and its chevron
+ *   affordance is hit-tested in screen space like the ×.
  *
  * Planning never mutates the document; the caller dispatches the command.
  */
@@ -26,7 +31,7 @@
 import { rectContains } from './geometry';
 import type { Point, Rect } from './geometry';
 import { newNode } from './nodeDefaults';
-import type { Command, Doc, Group, Id, Node } from './types';
+import type { Command, Doc, Edge, Group, Id, Node } from './types';
 
 // ── Constants (world units unless the name says screen px) ─────────────────
 
@@ -57,6 +62,26 @@ export const KANBAN_MIN_COLUMN_H = 120;
 /** Screen-px hit radius of the column's resize affordances (T-021 style). */
 export const KANBAN_RESIZE_HIT_RADIUS = 8;
 
+/**
+ * The width of a COLLAPSED column's rail, in world units (T-039): wide
+ * enough for the chevron and the rotated name to read, narrow enough to
+ * tuck a column out of the way. The rail keeps the stored top-left corner
+ * and height; only the width is replaced.
+ */
+export const KANBAN_COLLAPSED_W = 36;
+
+/**
+ * The header strip's chevron slot, in world units (T-039): the collapse /
+ * expand chevron sits at its left, so the column NAME starts this far
+ * right of `KANBAN_PADDING` — the renderer, the rename overlay and the
+ * chevron's hit-test all derive from the same reservation, so glyph and
+ * target can never drift apart (the `columnClosePoint` rule).
+ */
+export const KANBAN_CHEVRON_SLOT = 20;
+
+/** Screen-px hit radius of the column's collapse chevron (T-021 style). */
+export const KANBAN_CHEVRON_HIT_RADIUS = 10;
+
 /** The default board's column names, left → right. */
 export const KANBAN_BOARD_COLUMNS = ['To Do', 'Doing', 'Done'] as const;
 
@@ -68,7 +93,16 @@ export function isColumn(group: Group): boolean {
 }
 
 /**
- * The column's stored rect, or null when the group is not a column or its
+ * True while the kanban column is COLLAPSED to its rail (T-039). The flag
+ * is column-only (`groupViolations` enforces it), so a plain frame is never
+ * collapsed even if a legacy file says so.
+ */
+export function isCollapsed(group: Group): boolean {
+  return isColumn(group) && group.collapsed === true;
+}
+
+/**
+ * The column's STORED rect, or null when the group is not a column or its
  * geometry is missing (defensive — `validateDoc` guarantees geometry for
  * every column in a valid document).
  */
@@ -84,6 +118,18 @@ export function columnRect(group: Group): Rect | null {
     return null;
   }
   return { x, y, w, h };
+}
+
+/**
+ * The RAIL rect a collapsed column paints and hit-tests as (T-039): the
+ * stored top-left corner and height, the width replaced by
+ * `KANBAN_COLLAPSED_W`. Null when the group is not a column or its stored
+ * geometry is missing (defensive). Pure — the document is untouched.
+ */
+export function columnRailRect(group: Group): Rect | null {
+  const stored = columnRect(group);
+  if (stored === null) return null;
+  return { x: stored.x, y: stored.y, w: KANBAN_COLLAPSED_W, h: stored.h };
 }
 
 /** Every column group in the document, in `doc.groups` insertion order. */
@@ -111,11 +157,16 @@ export function columnContentHeight(cards: Node[]): number {
  * (the height is derived, like edge geometry is from node rects, D-31). The
  * top-left corner never moves (growth extends downward). Null when the
  * group is not a column or its stored geometry is missing (defensive).
+ *
+ * T-039: a COLLAPSED column's effective rect is its RAIL — the cards are
+ * hidden, so there is no content to grow for, and the painted, clickable
+ * and droppable column is the same narrow strip through this one function.
  */
 export function columnEffectiveRectOf(
   group: Group,
   members: Node[],
 ): Rect | null {
+  if (isCollapsed(group)) return columnRailRect(group);
   const stored = columnRect(group);
   if (stored === null) return null;
   const content = columnContentHeight(members);
@@ -148,12 +199,16 @@ export function columnMembers(doc: Doc, columnId: Id): Node[] {
  * The column whose EFFECTIVE rect contains `point`, or null. Later groups win
  * (the same rule `groupFrameAt` uses) — overlapping columns resolve top-most
  * by insertion order. T-037: the grown area below the stored height is a
- * drop target like any other part of the column.
+ * drop target like any other part of the column. T-039: a COLLAPSED column
+ * is never a target — its rail is not a drop zone (a card joining a hidden
+ * stack would look like it vanished), so a drop over the rail falls through
+ * to the plain free move, and a double-click there never creates a seated
+ * card.
  */
 export function columnAt(doc: Doc, point: Point): Id | null {
   let hit: Id | null = null;
   for (const [id, group] of Object.entries(doc.groups)) {
-    if (!isColumn(group)) continue;
+    if (!isColumn(group) || isCollapsed(group)) continue;
     const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
     if (rect !== null && rectContains(rect, point)) hit = id;
   }
@@ -172,7 +227,8 @@ export function columnClosePoint(rect: Rect): Point {
  * The column whose × close affordance is under `point`, or null: the hit
  * test happens in SCREEN space (`world distance × zoom` against the radius)
  * so the target stays comfortably clickable at any zoom — the resize-handle
- * precedent (T-021).
+ * precedent (T-021). T-039: a COLLAPSED column paints no × (the rail keeps
+ * only the chevron and the name), so it is never closable until expanded.
  */
 export function columnCloseHit(
   doc: Doc,
@@ -181,7 +237,7 @@ export function columnCloseHit(
 ): Id | null {
   if (!Number.isFinite(zoom) || zoom <= 0) return null;
   for (const [id, group] of Object.entries(doc.groups)) {
-    if (!isColumn(group)) continue;
+    if (!isColumn(group) || isCollapsed(group)) continue;
     const rect = columnRect(group);
     if (rect === null) continue;
     const cp = columnClosePoint(rect);
@@ -194,11 +250,59 @@ export function columnCloseHit(
 // ── Column affordances (T-037) ───────────────────────────────────────────────
 
 /**
+ * The world point at the centre of a column's collapse chevron (T-039):
+ * dead centre of the rail's top strip when collapsed, in the expanded
+ * header's reserved left slot otherwise — the exact point
+ * `columnCollapseHit` hit-tests and the renderer paints, so glyph and
+ * target can never drift apart (the `columnClosePoint` rule).
+ */
+export function columnCollapsePoint(group: Group): Point | null {
+  if (isCollapsed(group)) {
+    const rail = columnRailRect(group);
+    if (rail === null) return null;
+    return { x: rail.x + rail.w / 2, y: rail.y + KANBAN_HEADER_H / 2 };
+  }
+  const rect = columnRect(group);
+  if (rect === null) return null;
+  return {
+    x: rect.x + KANBAN_PADDING + KANBAN_CHEVRON_SLOT / 2,
+    y: rect.y + KANBAN_HEADER_H / 2,
+  };
+}
+
+/**
+ * The column whose collapse chevron is under `point`, or null (T-039): the
+ * hit test happens in SCREEN space (`world distance × zoom` against the
+ * radius) so the target stays comfortably clickable at any zoom — the ×
+ * affordance precedent (T-035). The input layer checks this BEFORE the
+ * header hit-test: the chevron sits inside the header strip.
+ */
+export function columnCollapseHit(
+  doc: Doc,
+  point: Point,
+  zoom: number,
+): Id | null {
+  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  for (const [id, group] of Object.entries(doc.groups)) {
+    if (!isColumn(group)) continue;
+    const cp = columnCollapsePoint(group);
+    if (cp === null) continue;
+    const d = Math.hypot(point.x - cp.x, point.y - cp.y);
+    if (d * zoom <= KANBAN_CHEVRON_HIT_RADIUS) return id;
+  }
+  return null;
+}
+
+/**
  * The column whose HEADER strip contains `point`, or null (T-037): the
  * header is the drag handle — a press there moves the whole column (the ×
  * zone is hit-tested first by the input layer, so it never reaches here as
  * a drag target). Later groups win, the `columnAt` rule. The strip spans the
  * EFFECTIVE rect's full width and the first KANBAN_HEADER_H units.
+ *
+ * T-039: a COLLAPSED column's ENTIRE rail is its header — the rail is the
+ * handle (press anywhere on it to move the column), because there is no
+ * body left to press.
  */
 export function columnHeaderHit(doc: Doc, point: Point): Id | null {
   let hit: Id | null = null;
@@ -208,7 +312,7 @@ export function columnHeaderHit(doc: Doc, point: Point): Id | null {
     if (
       rect !== null &&
       rectContains(rect, point) &&
-      point.y <= rect.y + KANBAN_HEADER_H
+      (isCollapsed(group) || point.y <= rect.y + KANBAN_HEADER_H)
     ) {
       hit = id;
     }
@@ -231,7 +335,9 @@ export interface ColumnResizeHitResult {
  * bottom edge's midpoint (height only) and the bottom-right corner (both).
  * The hit test happens in SCREEN space (`world distance × zoom` against the
  * radius), so the targets stay clickable at any zoom — the × affordance
- * precedent (T-035) and the resize handles (T-021).
+ * precedent (T-035) and the resize handles (T-021). T-039: a COLLAPSED
+ * column paints no resize handles (the rail's width is not its stored
+ * width), so it is not resizable until expanded.
  */
 export function columnResizeHit(
   doc: Doc,
@@ -240,7 +346,7 @@ export function columnResizeHit(
 ): ColumnResizeHitResult | null {
   if (!Number.isFinite(zoom) || zoom <= 0) return null;
   for (const [id, group] of Object.entries(doc.groups)) {
-    if (!isColumn(group)) continue;
+    if (!isColumn(group) || isCollapsed(group)) continue;
     const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
     if (rect === null) continue;
     // The corner is the most specific: a point near it may be inside all
@@ -296,6 +402,32 @@ export function dragMembersOf(doc: Doc, nodeId: Id): Id[] {
     if (n !== undefined && n.groupId === node.groupId) members.push(id);
   }
   return members;
+}
+
+/**
+ * True when `node` is a card of a COLLAPSED column (T-039): the card is
+ * hidden — not deleted — until the column expands again. The single
+ * derived fact the renderer, the hit-tests, the marquee and the PNG bounds
+ * all read, so the painted board and the clickable board stay the same
+ * board (the `columnEffectiveRect` rule, applied to cards). Pure.
+ */
+export function hiddenByCollapse(doc: Doc, node: Node): boolean {
+  if (node.groupId === undefined) return false;
+  const group = doc.groups[node.groupId];
+  return group !== undefined && isCollapsed(group);
+}
+
+/**
+ * True when `edge` touches a hidden card (T-039): an edge glued to a card
+ * of a collapsed column hides with it — a dangling arrow pointing into the
+ * rail would look like a bug, not a feature. Pure.
+ */
+export function edgeHiddenByCollapse(doc: Doc, edge: Edge): boolean {
+  const from = doc.nodes[edge.from.node];
+  if (from !== undefined && hiddenByCollapse(doc, from)) return true;
+  const to = doc.nodes[edge.to.node];
+  if (to !== undefined && hiddenByCollapse(doc, to)) return true;
+  return false;
 }
 
 // ── Slot layout ─────────────────────────────────────────────────────────────
