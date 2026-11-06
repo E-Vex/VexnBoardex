@@ -81,21 +81,6 @@ export interface ColumnResizePreview {
 }
 
 /**
- * A column reorder in progress (T-038): the dragged column and the
- * horizontal shifts the OTHER columns take to open the gap — the live
- * Trello-style reflow. The dragged column itself follows `columnDrag`
- * (the raw gesture delta); only the parted columns live here. A preview
- * only — the document is untouched until pointer-up (I-04); the renderer
- * offsets the parted panels AND their member cards.
- */
-export interface ColumnReorderPreview {
-  /** The dragged column (never listed in `shifts`). */
-  id: Id;
-  /** Horizontal world-unit shifts per parted column id. */
-  shifts: Record<Id, number>;
-}
-
-/**
  * The interaction mode (T-029, M9). `select` is the free-form board;
  * `mindmap` layers the tree behaviour (Tab = child, Enter = sibling) on the
  * SAME document model (D-14). UI-only — never saved, never in history
@@ -133,9 +118,6 @@ export interface UiState {
   columnDrag: ColumnDragPreview | null;
   /** A column resize gesture preview (T-037). UI-only — never saved (I-05). */
   columnResize: ColumnResizePreview | null;
-  /** A column reorder preview (T-038): the parted columns' shifts.
-   * UI-only — never saved (I-05). */
-  columnReorder: ColumnReorderPreview | null;
   /**
    * The kanban column a card drag is currently over (T-037): the renderer
    * highlights it as the drop target. UI-only — never saved (I-05); null
@@ -171,8 +153,6 @@ export interface UiStore {
   setColumnDrag(drag: ColumnDragPreview | null): void;
   /** Replace the column resize preview (T-037). No notification when equal. */
   setColumnResize(resize: ColumnResizePreview | null): void;
-  /** Replace the column reorder preview (T-038). No notification when equal. */
-  setColumnReorder(reorder: ColumnReorderPreview | null): void;
   /** Replace the kanban drop-target highlight (T-037). No notification when
    * the id is unchanged. */
   setKanbanDropTarget(id: Id | null): void;
@@ -246,24 +226,6 @@ function sameColumnResize(
   );
 }
 
-/** True when two column reorder previews are equal (T-038): same dragged
- * column and the same per-column shifts (same keys, same values). */
-function sameColumnReorder(
-  a: ColumnReorderPreview | null,
-  b: ColumnReorderPreview | null,
-): boolean {
-  if (a === b) return true;
-  if (a === null || b === null) return false;
-  if (a.id !== b.id) return false;
-  const aKeys = Object.keys(a.shifts);
-  const bKeys = Object.keys(b.shifts);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const key of aKeys) {
-    if (a.shifts[key] !== b.shifts[key]) return false;
-  }
-  return true;
-}
-
 /** True when two UI states are equal. */
 function sameUiState(a: UiState, b: UiState): boolean {
   return (
@@ -278,7 +240,6 @@ function sameUiState(a: UiState, b: UiState): boolean {
     sameIds(a.edgeSelection, b.edgeSelection) &&
     sameColumnDrag(a.columnDrag, b.columnDrag) &&
     sameColumnResize(a.columnResize, b.columnResize) &&
-    sameColumnReorder(a.columnReorder, b.columnReorder) &&
     a.kanbanDropTarget === b.kanbanDropTarget &&
     a.editingColumn === b.editingColumn
   );
@@ -312,7 +273,6 @@ export function createUiStore(): UiStore {
     edgeSelection: [],
     columnDrag: null,
     columnResize: null,
-    columnReorder: null,
     kanbanDropTarget: null,
     editingColumn: null,
   };
@@ -364,9 +324,6 @@ export function createUiStore(): UiStore {
     },
     setColumnResize(resize: ColumnResizePreview | null) {
       patch({ columnResize: resize });
-    },
-    setColumnReorder(reorder: ColumnReorderPreview | null) {
-      patch({ columnReorder: reorder });
     },
     setKanbanDropTarget(id: Id | null) {
       patch({ kanbanDropTarget: id });
