@@ -94,6 +94,17 @@ export interface Group {
   w?: number;
   /** Column geometry in world units (T-035) — present iff `role` is set. */
   h?: number;
+  /**
+   * True while the column is COLLAPSED to its rail (T-039, M9): the panel
+   * paints as a narrow vertical rail (chevron + rotated name) and its
+   * member cards — and their edges — are hidden, never deleted; expanding
+   * returns every card to its exact slot. Optional: absent means expanded,
+   * so files written before collapsing stay valid without a migration
+   * (I-08, no version bump). Only a column may carry the flag
+   * (`groupViolations` rejects it on a plain frame — a plain frame derives
+   * everything from its members, T-024).
+   */
+  collapsed?: boolean;
 }
 
 /**
@@ -166,8 +177,10 @@ export type Command =
    * Update the listed groups' content (T-037, M9 — kanban column polish):
    * the name and, for columns, the stored geometry. The same command covers
    * rename, resize and move — one command, one undo step, mirroring
-   * `node.update`/`node.resize`. The `role` is structural and NOT patchable
-   * (a column becoming a plain frame would leave dangling card slots).
+   * `node.update`/`node.resize`. T-039: it also covers the column's
+   * COLLAPSE flag (a collapse/expand is one `group.update`, one undo step).
+   * The `role` is structural and NOT patchable (a column becoming a plain
+   * frame would leave dangling card slots).
    */
   | { type: 'group.update'; ids: Id[]; patch: GroupContentPatch }
   /**
@@ -215,6 +228,11 @@ export interface NodeContentPatch {
  * values; the merged result must satisfy `groupViolations` (a column needs
  * all four, finite, w > 0, h > 0 — a plain frame may carry NO geometry).
  * `role` is deliberately absent: it is structural, not content.
+ *
+ * T-039 (M9): `collapsed` joined — `true` collapses the column to its rail,
+ * `false` expands it (normalised to "absent", the expanded default, so a
+ * no-op toggle compiles to an empty patch and files never carry a
+ * meaningless `false`). Columns only; on a plain frame it throws.
  */
 export interface GroupContentPatch {
   name?: string;
@@ -222,6 +240,8 @@ export interface GroupContentPatch {
   y?: number;
   w?: number;
   h?: number;
+  /** The collapse flag (T-039): true = rail, false/absent = expanded. */
+  collapsed?: boolean;
 }
 
 /**

@@ -43,6 +43,10 @@ export const VALID_GROUP_ROLES: ReadonlySet<GroupRole> = new Set(['kanban']);
  *   (w > 0, h > 0), or geometry fields on a group with NO role (a plain
  *   frame derives its rect from its members — stored geometry would be a
  *   lie, T-024).
+ * - `bad-group-collapse:` — a collapse flag on a group with NO role (T-039:
+ *   collapse is column behaviour attached to the DATA, D-14 — on a plain
+ *   frame it would be a lie, the same rule stored geometry follows), or a
+ *   non-boolean `collapsed` on a column.
  *
  * Pure: returns [] when the group's shape is valid.
  */
@@ -65,6 +69,12 @@ export function groupViolations(group: Group, key = group.id): string[] {
         `bad-group-geometry: group "${key}" has geometry but no role`,
       );
     }
+    // T-039: a collapse flag without a role is the same lie geometry is.
+    if (group.collapsed !== undefined) {
+      errors.push(
+        `bad-group-collapse: group "${key}" has collapsed but no role`,
+      );
+    }
     return errors;
   }
   // role === 'kanban': finite geometry, w > 0, h > 0, all four present.
@@ -83,6 +93,12 @@ export function groupViolations(group: Group, key = group.id): string[] {
   ) {
     errors.push(
       `bad-group-geometry: kanban column "${key}" needs finite x/y/w/h with w > 0 and h > 0`,
+    );
+  }
+  // T-039: the collapse flag is a boolean when present (commands are data).
+  if (group.collapsed !== undefined && typeof group.collapsed !== 'boolean') {
+    errors.push(
+      `bad-group-collapse: kanban column "${key}" has non-boolean collapsed`,
     );
   }
   return errors;
@@ -108,6 +124,8 @@ export function groupViolations(group: Group, key = group.id): string[] {
  *   edge routes (T-033).
  * - `bad-group-role:` / `bad-group-geometry:` — a group whose layout role or
  *   column geometry is invalid (T-035; see `groupViolations`).
+ * - `bad-group-collapse:` — a collapse flag on a plain frame, or a
+ *   non-boolean `collapsed` on a column (T-039; see `groupViolations`).
  */
 export function validateDoc(doc: Doc): string[] {
   const errors: string[] = [];

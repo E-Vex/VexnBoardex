@@ -29,11 +29,17 @@ import {
 import { groupFrameRect } from '../core/hitTest';
 import {
   columnClosePoint,
+  columnCollapsePoint,
   columnContentHeight,
   columnEffectiveRectOf,
   columnMembers,
   columnRect,
+  edgeHiddenByCollapse,
+  hiddenByCollapse,
+  isCollapsed,
   isColumn,
+  KANBAN_CHEVRON_SLOT,
+  KANBAN_COLLAPSED_W,
   KANBAN_HEADER_H,
   KANBAN_PADDING,
 } from '../core/kanban';
@@ -536,6 +542,13 @@ export interface KanbanColumnStyle {
   highlight: boolean;
   /** Paint the column name — skipped while the DOM overlay edits it. */
   drawName: boolean;
+  /**
+   * Paint the COLLAPSED rail instead of the panel (T-039): the chevron
+   * flips to ›, the name rotates along the rail, and the × is left out —
+   * a collapsed column is expanded (or dragged by its rail) before it is
+   * closed or resized.
+   */
+  collapsed: boolean;
 }
 
 /**
@@ -549,6 +562,10 @@ export interface KanbanColumnStyle {
  * T-018) so it stays clickable-looking at any zoom. T-037: `style.highlight`
  * swaps in the accent wash + border (the drop-target highlight), and
  * `style.drawName === false` leaves the header text to the DOM overlay.
+ * T-039: the collapse chevron sits at `columnCollapsePoint` in the header's
+ * reserved left slot (the name shifts right of it), and
+ * `style.collapsed` paints the RAIL — chevron flipped, name rotated along
+ * the rail, no ×.
  */
 function drawKanbanColumn(
   ctx: CanvasRenderingContext2D,
@@ -575,14 +592,56 @@ function drawKanbanColumn(
   ctx.lineTo(rect.x + rect.w, headerY);
   ctx.stroke();
 
-  // The column name, vertically centred in the header (the same text LOD
-  // the group frames use). Skipped while the overlay edits it (T-037).
+  if (style.collapsed) {
+    // T-039 — the rail: the › chevron in the top strip, the name rotated
+    // along the rail (clipped to the rail below the strip), no ×.
+    drawColumnChevron(
+      ctx,
+      columnCollapsePoint(rect, true),
+      1, // › = "expand me"
+      scale,
+    );
+    if (style.drawName && FONT_SIZE * scale >= MIN_TEXT_SIZE) {
+      ctx.save();
+      // Clip to the rail below the chevron strip, so a long name trims
+      // instead of running through the chevron.
+      ctx.beginPath();
+      ctx.rect(
+        rect.x,
+        rect.y + KANBAN_HEADER_H,
+        rect.w,
+        Math.max(0, rect.h - KANBAN_HEADER_H - KANBAN_PADDING),
+      );
+      ctx.clip();
+      ctx.translate(rect.x + rect.w / 2, rect.y + rect.h - KANBAN_PADDING);
+      ctx.rotate(-Math.PI / 2); // reading bottom → top, like a book spine
+      ctx.font = `600 15px ${FONT_STACK}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = KANBAN_HEADER_COLOR;
+      ctx.fillText(name, 0, 0);
+      ctx.restore();
+    }
+    return;
+  }
+
+  // The collapse chevron — ‹ = "tuck me away" — in its reserved slot.
+  drawColumnChevron(ctx, columnCollapsePoint(rect, false), -1, scale);
+
+  // The column name, vertically centred in the header right of the
+  // chevron slot (the same text LOD the group frames use). Skipped while
+  // the overlay edits it (T-037); shifted right of the chevron (T-039),
+  // exactly where the rename overlay positions itself.
   if (style.drawName && FONT_SIZE * scale >= MIN_TEXT_SIZE) {
     ctx.font = `600 15px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = KANBAN_HEADER_COLOR;
-    ctx.fillText(name, rect.x + KANBAN_PADDING, rect.y + KANBAN_HEADER_H / 2);
+    ctx.fillText(
+      name,
+      rect.x + KANBAN_PADDING + KANBAN_CHEVRON_SLOT,
+      rect.y + KANBAN_HEADER_H / 2,
+    );
   }
 
   // The × close affordance (screen-constant size).
@@ -596,6 +655,31 @@ function drawKanbanColumn(
   ctx.lineWidth = 2 / scale;
   ctx.strokeStyle = KANBAN_CLOSE_COLOR;
   ctx.stroke();
+}
+
+/**
+ * Draw a column's collapse chevron (T-039) at `point`: an angle bracket
+ * of two strokes, ‹ when `dir === -1` (collapse) and › when `dir === 1`
+ * (expand). Painted at `columnCollapsePoint` — the exact point
+ * `columnCollapseHit` hit-tests — with /scale sizes (the × metrics), so
+ * it stays clickable-looking at any zoom and DPR.
+ */
+function drawColumnChevron(
+  ctx: CanvasRenderingContext2D,
+  point: { x: number; y: number },
+  dir: -1 | 1,
+  scale: number,
+): void {
+  const arm = 4 / scale;
+  ctx.beginPath();
+  ctx.moveTo(point.x + dir * arm, point.y - arm);
+  ctx.lineTo(point.x - dir * arm, point.y);
+  ctx.lineTo(point.x + dir * arm, point.y + arm);
+  ctx.lineWidth = 2 / scale;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = KANBAN_CLOSE_COLOR;
+  ctx.stroke();
+  ctx.lineCap = 'butt';
 }
 
 /**
@@ -769,11 +853,14 @@ export function renderBoard(
   for (const [groupId, group] of Object.entries(doc.groups)) {
     if (isColumn(group)) {
       const members = columnMembers(doc, groupId);
+      const collapsed = isCollapsed(group); // T-039
       // The resize preview replaces the STORED rect (top-left anchored,
       // minimums clamped); the effective height still grows for the cards
-      // — the visible panel never clips them, mid-gesture or not.
+      // — the visible panel never clips them, mid-gesture or not. T-039: a
+      // resize gesture cannot START on a collapsed column (it paints no
+      // handles), so a stray preview on one is ignored.
       const preview =
-        columnResize !== null && columnResize.id === groupId
+        !collapsed && columnResize !== null && columnResize.id === groupId
           ? columnResize
           : null;
       const stored =
@@ -781,22 +868,39 @@ export function renderBoard(
           ? { x: preview.x, y: preview.y, w: preview.w, h: preview.h }
           : columnRect(group);
       if (stored !== null) {
-        const content = columnContentHeight(members);
-        const base = columnEffectiveRectOf(group, members);
-        const h = Math.max(
-          preview !== null ? preview.h : (base?.h ?? stored.h),
-          content,
-        );
         const dx =
           columnDrag !== null && columnDrag.id === groupId ? columnDrag.dx : 0;
         const dy =
           columnDrag !== null && columnDrag.id === groupId ? columnDrag.dy : 0;
-        const rect = { x: stored.x + dx, y: stored.y + dy, w: stored.w, h };
+        let rect: { x: number; y: number; w: number; h: number };
+        if (collapsed) {
+          // T-039: the RAIL — the stored top-left corner and height, the
+          // width swapped; the hidden cards never grow it (no auto-grow).
+          rect = {
+            x: stored.x + dx,
+            y: stored.y + dy,
+            w: KANBAN_COLLAPSED_W,
+            h: stored.h,
+          };
+        } else {
+          const content = columnContentHeight(members);
+          const base = columnEffectiveRectOf(group, members);
+          const h = Math.max(
+            preview !== null ? preview.h : (base?.h ?? stored.h),
+            content,
+          );
+          rect = { x: stored.x + dx, y: stored.y + dy, w: stored.w, h };
+        }
         drawKanbanColumn(ctx, rect, group.name, m.scale, {
           highlight: ui.kanbanDropTarget === groupId,
           drawName: ui.editingColumn !== groupId,
+          collapsed,
         });
-        drawColumnResizeHandles(ctx, rect, m.scale);
+        // The resize affordances belong to the panel — the rail is moved
+        // (its chevron) or expanded, never resized (T-039).
+        if (!collapsed) {
+          drawColumnResizeHandles(ctx, rect, m.scale);
+        }
       }
       continue;
     }
@@ -870,6 +974,9 @@ export function renderBoard(
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const edge of Object.values(doc.edges)) {
+    // T-039: an edge touching a hidden card hides with it — painting it
+    // would dangle an arrow into the rail.
+    if (edgeHiddenByCollapse(doc, edge)) continue;
     const points = edgePoints(edge, rectOf);
     if (points === null) continue; // one of the nodes is missing
     // Culling: the polyline's bounding box must intersect the visible rect.
@@ -923,6 +1030,10 @@ export function renderBoard(
   for (const id of doc.order) {
     const node = doc.nodes[id];
     if (node === undefined) continue; // defensive: order must be a permutation
+    // T-039: a card of a collapsed column is hidden — not painted and not
+    // clickable; its selection chrome waits for the expansion too. The
+    // document keeps it (the rail's group.update holds the only change).
+    if (hiddenByCollapse(doc, node)) continue;
     // Drag preview offset (R5) and resize preview rect (T-021): drawn at the
     // previewed geometry; the document is not touched. Culling uses the
     // rect actually drawn. T-037: a column gesture's preview moves or

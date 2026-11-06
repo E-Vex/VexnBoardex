@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { Command, Doc, Edge, EdgeEndpoint, Node } from './types';
 import { emptyDoc, validateDoc } from './doc';
-import { GROUP_FRAME_PADDING, groupFrameRect, groupMembersOf, groupFrameAt } from './hitTest';
+import {
+  GROUP_FRAME_PADDING,
+  groupFrameRect,
+  groupMembersOf,
+  groupFrameAt,
+} from './hitTest';
 import { deepEqual } from './deepEqual';
 import { applyPatch, invertPatch, isEmptyPatch } from './patch';
 import { CommandError, compileCommand } from './commands';
@@ -344,7 +349,7 @@ describe('node.delete — removes nodes, order entries and incident edges', () =
     expect(patch.nodes.n1!.before).toEqual(n);
   });
 
-  it('deleting a group\'s last member deletes the group in the same patch (T-024)', () => {
+  it("deleting a group's last member deletes the group in the same patch (T-024)", () => {
     const doc = docWith(node('n1'), node('n2'));
     doc.groups = { g1: { id: 'g1', name: 'g' } };
     doc.nodes.n1!.groupId = 'g1';
@@ -931,7 +936,11 @@ describe('node.update — content patch (T-019, M7)', () => {
   it('unknown ids throw CommandError', () => {
     const doc = docWith(node('a'));
     expect(() =>
-      compileCommand(doc, { type: 'node.update', ids: ['ghost'], patch: { text: 'x' } }),
+      compileCommand(doc, {
+        type: 'node.update',
+        ids: ['ghost'],
+        patch: { text: 'x' },
+      }),
     ).toThrow(CommandError);
   });
 
@@ -954,7 +963,9 @@ describe('node.update — content patch (T-019, M7)', () => {
   });
 
   it('do → undo restores the exact original document', () => {
-    const doc = docWith(node('a', { text: 'one', color: '#111', tags: ['t1'] }));
+    const doc = docWith(
+      node('a', { text: 'one', color: '#111', tags: ['t1'] }),
+    );
     const patch = compileCommand(doc, {
       type: 'node.update',
       ids: ['a'],
@@ -1008,16 +1019,44 @@ describe('node.resize — geometry (T-019, M7)', () => {
   it('unknown id and non-finite or non-positive sizes throw', () => {
     const doc = docWith(node('a'));
     expect(() =>
-      compileCommand(doc, { type: 'node.resize', id: 'ghost', x: 0, y: 0, w: 1, h: 1 }),
+      compileCommand(doc, {
+        type: 'node.resize',
+        id: 'ghost',
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(doc, { type: 'node.resize', id: 'a', x: NaN, y: 0, w: 1, h: 1 }),
+      compileCommand(doc, {
+        type: 'node.resize',
+        id: 'a',
+        x: NaN,
+        y: 0,
+        w: 1,
+        h: 1,
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(doc, { type: 'node.resize', id: 'a', x: 0, y: 0, w: 0, h: 1 }),
+      compileCommand(doc, {
+        type: 'node.resize',
+        id: 'a',
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 1,
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(doc, { type: 'node.resize', id: 'a', x: 0, y: 0, w: 1, h: -5 }),
+      compileCommand(doc, {
+        type: 'node.resize',
+        id: 'a',
+        x: 0,
+        y: 0,
+        w: 1,
+        h: -5,
+      }),
     ).toThrow(CommandError);
   });
 
@@ -1312,7 +1351,11 @@ describe('node.zOrder — z-order commands', () => {
   it('unknown ids throw CommandError', () => {
     const doc = docWith(node('a'));
     expect(() =>
-      compileCommand(doc, { type: 'node.zOrder', ids: ['ghost'], mode: 'front' }),
+      compileCommand(doc, {
+        type: 'node.zOrder',
+        ids: ['ghost'],
+        mode: 'front',
+      }),
     ).toThrow(CommandError);
   });
 
@@ -1371,13 +1414,28 @@ describe('group.assign — create a group and frame the nodes (T-024, M7)', () =
     const doc = docWith(node('a'));
     doc.groups = { g1: { id: 'g1', name: 'x' } };
     expect(() =>
-      compileCommand(doc, { type: 'group.assign', groupId: 'g1', name: 'y', ids: ['a'] }),
+      compileCommand(doc, {
+        type: 'group.assign',
+        groupId: 'g1',
+        name: 'y',
+        ids: ['a'],
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(doc, { type: 'group.assign', groupId: 'g2', name: 'y', ids: ['ghost'] }),
+      compileCommand(doc, {
+        type: 'group.assign',
+        groupId: 'g2',
+        name: 'y',
+        ids: ['ghost'],
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(doc, { type: 'group.assign', groupId: '', name: 'y', ids: ['a'] }),
+      compileCommand(doc, {
+        type: 'group.assign',
+        groupId: '',
+        name: 'y',
+        ids: ['a'],
+      }),
     ).toThrow(CommandError);
   });
 
@@ -1387,7 +1445,12 @@ describe('group.assign — create a group and frame the nodes (T-024, M7)', () =
     doc.nodes['a']!.groupId = 'g1';
     const next = applyPatch(
       doc,
-      compileCommand(doc, { type: 'group.assign', groupId: 'g2', name: 'two', ids: ['a'] }),
+      compileCommand(doc, {
+        type: 'group.assign',
+        groupId: 'g2',
+        name: 'two',
+        ids: ['a'],
+      }),
     );
     expect(next.nodes['a']!.groupId).toBe('g2');
     expect(next.groups['g1']).toEqual({ id: 'g1', name: 'one' });
@@ -1554,7 +1617,10 @@ describe('group.create — kanban columns (T-035, M9)', () => {
   it('do → undo gives the exact original document', () => {
     const doc = docWith(node('n1'));
     const frozen = deepFreeze(structuredClone(doc));
-    const patch = compileCommand(doc, { type: 'group.create', group: column('c1') });
+    const patch = compileCommand(doc, {
+      type: 'group.create',
+      group: column('c1'),
+    });
     const next = applyPatch(doc, patch);
     const undone = applyPatch(next, invertPatch(patch));
     expect(deepEqual(undone, frozen)).toBe(true);
@@ -1565,8 +1631,24 @@ describe('group.update — column rename/move/resize (T-037, M9)', () => {
   function board(): Doc {
     const doc = docWith(node('a'));
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
-      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: 0, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+      c2: {
+        id: 'c2',
+        name: 'Doing',
+        role: 'kanban',
+        x: 300,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
       g1: { id: 'g1', name: 'frame' },
     };
     doc.nodes['a']!.groupId = 'c1';
@@ -1619,11 +1701,14 @@ describe('group.update — column rename/move/resize (T-037, M9)', () => {
 
   it('renames a plain frame (no geometry) the same way', () => {
     const doc = board();
-    const next = applyPatch(doc, compileCommand(doc, {
-      type: 'group.update',
-      ids: ['g1'],
-      patch: { name: 'sprint' },
-    }));
+    const next = applyPatch(
+      doc,
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['g1'],
+        patch: { name: 'sprint' },
+      }),
+    );
     expect(next.groups.g1).toEqual({ id: 'g1', name: 'sprint' });
     expect(validateDoc(next)).toEqual([]);
   });
@@ -1639,37 +1724,69 @@ describe('group.update — column rename/move/resize (T-037, M9)', () => {
         }),
       ),
     ).toBe(true);
-    expect(isEmptyPatch(compileCommand(doc, { type: 'group.update', ids: [], patch: {} }))).toBe(
-      true,
-    );
+    expect(
+      isEmptyPatch(
+        compileCommand(doc, { type: 'group.update', ids: [], patch: {} }),
+      ),
+    ).toBe(true);
     // Duplicates are ignored — the second occurrence is not a change.
-    expect(isEmptyPatch(compileCommand(doc, { type: 'group.update', ids: ['c1', 'c1'], patch: {} }))).toBe(
-      true,
-    );
+    expect(
+      isEmptyPatch(
+        compileCommand(doc, {
+          type: 'group.update',
+          ids: ['c1', 'c1'],
+          patch: {},
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('throws on unknown ids, bad values and invalid merged groups', () => {
     const doc = board();
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['nope'], patch: { name: 'x' } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['nope'],
+        patch: { name: 'x' },
+      }),
     ).toThrow(/unknown group/);
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { name: 7 as unknown as string } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['c1'],
+        patch: { name: 7 as unknown as string },
+      }),
     ).toThrow(/patch.name/);
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: NaN } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['c1'],
+        patch: { w: NaN },
+      }),
     ).toThrow(/not finite/);
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: 0 } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['c1'],
+        patch: { w: 0 },
+      }),
     ).toThrow(/bad-group-geometry/);
     // A plain frame may not gain geometry (validateDoc rule, D-24).
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['g1'], patch: { x: 0 } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['g1'],
+        patch: { x: 0 },
+      }),
     ).toThrow(/bad-group-geometry/);
     // An explicit undefined field counts as absent (no-op, D-22) —
     // geometry can only be REPLACED, never removed, through the patch.
     expect(() =>
-      compileCommand(doc, { type: 'group.update', ids: ['c1'], patch: { w: undefined as unknown as number } }),
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['c1'],
+        patch: { w: undefined as unknown as number },
+      }),
     ).not.toThrow();
   });
 
@@ -1688,6 +1805,162 @@ describe('group.update — column rename/move/resize (T-037, M9)', () => {
   });
 });
 
+describe('group.update — the collapse flag (T-039, M9)', () => {
+  function board(): Doc {
+    const doc = docWith(node('a'));
+    doc.groups = {
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+      c2: {
+        id: 'c2',
+        name: 'Doing',
+        role: 'kanban',
+        x: 300,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+      g1: { id: 'g1', name: 'frame' },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    return doc;
+  }
+
+  it('collapses a column: collapsed true, nothing else changes', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1'],
+      patch: { collapsed: true },
+    });
+    expect(patch.groups.c1).toEqual({
+      before: doc.groups.c1,
+      after: { ...doc.groups.c1!, collapsed: true },
+    });
+    expect(patch.nodes).toEqual({});
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1!.collapsed).toBe(true);
+    expect(next.nodes.a!.groupId).toBe('c1'); // membership untouched
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('expands by REMOVING the flag — a false never reaches the document', () => {
+    const doc = board();
+    doc.groups.c1!.collapsed = true;
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1'],
+      patch: { collapsed: false },
+    });
+    expect(patch.groups.c1!.after).not.toHaveProperty('collapsed');
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).not.toHaveProperty('collapsed');
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('a no-op expand (never collapsed) compiles to an empty patch (D-22)', () => {
+    expect(
+      isEmptyPatch(
+        compileCommand(board(), {
+          type: 'group.update',
+          ids: ['c1'],
+          patch: { collapsed: false },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('a legacy false is normalised away as a no-op, not a change', () => {
+    const doc = board();
+    doc.groups.c1!.collapsed = false; // a hand-built legacy value
+    expect(
+      isEmptyPatch(
+        compileCommand(doc, {
+          type: 'group.update',
+          ids: ['c1'],
+          patch: { collapsed: false },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('collapse merges with other fields — one patch, exact do→undo', () => {
+    const doc = board();
+    const frozen = deepFreeze(structuredClone(doc));
+    const patch = compileCommand(doc, {
+      type: 'group.update',
+      ids: ['c1', 'c2'],
+      patch: { collapsed: true, name: 'Backlog' },
+    });
+    expect(Object.keys(patch.groups).sort()).toEqual(['c1', 'c2']);
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c1).toMatchObject({ name: 'Backlog', collapsed: true });
+    expect(validateDoc(next)).toEqual([]);
+    const undone = applyPatch(next, invertPatch(patch));
+    expect(deepEqual(undone, frozen)).toBe(true);
+  });
+
+  it('throws on a non-boolean flag and on a plain frame (bad-group-collapse)', () => {
+    const doc = board();
+    expect(() =>
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['c1'],
+        patch: { collapsed: 'yes' as unknown as boolean },
+      }),
+    ).toThrow(/patch.collapsed/);
+    // A plain frame may not carry the flag (D-24, same rule as geometry).
+    expect(() =>
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['g1'],
+        patch: { collapsed: true },
+      }),
+    ).toThrow(/bad-group-collapse/);
+    // Expanding a plain frame is a no-op, not an error (false = absent).
+    expect(() =>
+      compileCommand(doc, {
+        type: 'group.update',
+        ids: ['g1'],
+        patch: { collapsed: false },
+      }),
+    ).not.toThrow();
+  });
+
+  it('group.create validates the flag the same way (D-22)', () => {
+    const doc = board();
+    const patch = compileCommand(doc, {
+      type: 'group.create',
+      group: {
+        id: 'c3',
+        name: 'Done',
+        role: 'kanban',
+        x: 600,
+        y: 0,
+        w: 240,
+        h: 400,
+        collapsed: true,
+      },
+    });
+    const next = applyPatch(doc, patch);
+    expect(next.groups.c3!.collapsed).toBe(true);
+    expect(validateDoc(next)).toEqual([]);
+    expect(() =>
+      compileCommand(doc, {
+        type: 'group.create',
+        group: { id: 'g2', name: 'plain', collapsed: true },
+      }),
+    ).toThrow(/bad-group-collapse/);
+  });
+});
+
 describe('group.delete — remove columns, members survive (T-035, M9)', () => {
   function board(): Doc {
     const doc = docWith(
@@ -1695,8 +1968,24 @@ describe('group.delete — remove columns, members survive (T-035, M9)', () => {
       node('b', { x: 0, y: 132, w: 200, h: 120 }),
     );
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: -16, y: -16, w: 240, h: 400 },
-      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: -16, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: -16,
+        y: -16,
+        w: 240,
+        h: 400,
+      },
+      c2: {
+        id: 'c2',
+        name: 'Doing',
+        role: 'kanban',
+        x: 300,
+        y: -16,
+        w: 240,
+        h: 400,
+      },
     };
     doc.nodes['a']!.groupId = 'c1';
     doc.nodes['b']!.groupId = 'c1';
@@ -1705,7 +1994,10 @@ describe('group.delete — remove columns, members survive (T-035, M9)', () => {
 
   it('removes the groups and unassigns every member in the SAME patch', () => {
     const doc = board();
-    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c1', 'c2'] });
+    const patch = compileCommand(doc, {
+      type: 'group.delete',
+      ids: ['c1', 'c2'],
+    });
     expect(patch.groups.c1).toEqual({ before: doc.groups.c1 });
     expect(patch.groups.c2).toEqual({ before: doc.groups.c2 });
     expect(patch.nodes.a).toBeDefined();
@@ -1726,7 +2018,9 @@ describe('group.delete — remove columns, members survive (T-035, M9)', () => {
   });
 
   it('empty ids → empty patch; unknown id throws', () => {
-    expect(isEmptyPatch(compileCommand(board(), { type: 'group.delete', ids: [] }))).toBe(true);
+    expect(
+      isEmptyPatch(compileCommand(board(), { type: 'group.delete', ids: [] })),
+    ).toBe(true);
     expect(() =>
       compileCommand(board(), { type: 'group.delete', ids: ['nope'] }),
     ).toThrow(CommandError);
@@ -1734,7 +2028,10 @@ describe('group.delete — remove columns, members survive (T-035, M9)', () => {
 
   it('duplicates are ignored', () => {
     const doc = board();
-    const patch = compileCommand(doc, { type: 'group.delete', ids: ['c1', 'c1'] });
+    const patch = compileCommand(doc, {
+      type: 'group.delete',
+      ids: ['c1', 'c1'],
+    });
     expect(Object.keys(patch.groups)).toEqual(['c1']);
   });
 
@@ -1751,8 +2048,24 @@ describe('node.setGroup — membership primitive (T-035, M9)', () => {
   function board(): Doc {
     const doc = docWith(node('a'), node('b'), node('c'));
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
-      c2: { id: 'c2', name: 'Doing', role: 'kanban', x: 300, y: 0, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+      c2: {
+        id: 'c2',
+        name: 'Doing',
+        role: 'kanban',
+        x: 300,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
     };
     doc.nodes['a']!.groupId = 'c1';
     doc.nodes['b']!.groupId = 'c1';
@@ -1777,13 +2090,21 @@ describe('node.setGroup — membership primitive (T-035, M9)', () => {
 
   it('clears membership with null', () => {
     const doc = board();
-    const patch = compileCommand(doc, { type: 'node.setGroup', ids: ['a'], groupId: null });
+    const patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['a'],
+      groupId: null,
+    });
     expect(patch.nodes.a!.after).not.toHaveProperty('groupId');
   });
 
   it('clearing an already-free node is an empty patch (undefined ≡ null)', () => {
     const doc = board(); // c is free
-    const patch = compileCommand(doc, { type: 'node.setGroup', ids: ['c'], groupId: null });
+    const patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['c'],
+      groupId: null,
+    });
     expect(isEmptyPatch(patch)).toBe(true);
   });
 
@@ -1798,16 +2119,34 @@ describe('node.setGroup — membership primitive (T-035, M9)', () => {
 
   it('empty ids → empty patch; unknown ids and groups throw', () => {
     expect(
-      isEmptyPatch(compileCommand(board(), { type: 'node.setGroup', ids: [], groupId: 'c1' })),
+      isEmptyPatch(
+        compileCommand(board(), {
+          type: 'node.setGroup',
+          ids: [],
+          groupId: 'c1',
+        }),
+      ),
     ).toBe(true);
     expect(() =>
-      compileCommand(board(), { type: 'node.setGroup', ids: ['nope'], groupId: 'c1' }),
+      compileCommand(board(), {
+        type: 'node.setGroup',
+        ids: ['nope'],
+        groupId: 'c1',
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(board(), { type: 'node.setGroup', ids: ['a'], groupId: 'nope' }),
+      compileCommand(board(), {
+        type: 'node.setGroup',
+        ids: ['a'],
+        groupId: 'nope',
+      }),
     ).toThrow(CommandError);
     expect(() =>
-      compileCommand(board(), { type: 'node.setGroup', ids: ['a'], groupId: '' }),
+      compileCommand(board(), {
+        type: 'node.setGroup',
+        ids: ['a'],
+        groupId: '',
+      }),
     ).toThrow(CommandError);
   });
 
@@ -1817,7 +2156,11 @@ describe('node.setGroup — membership primitive (T-035, M9)', () => {
     doc.nodes['a']!.groupId = 'g1';
     doc.nodes['b']!.groupId = 'g1';
     // b moves out; a stays → no cascade.
-    let patch = compileCommand(doc, { type: 'node.setGroup', ids: ['b'], groupId: null });
+    let patch = compileCommand(doc, {
+      type: 'node.setGroup',
+      ids: ['b'],
+      groupId: null,
+    });
     expect(patch.groups).toEqual({});
     // Both move out → the plain frame goes in the same patch.
     patch = compileCommand(doc, {
@@ -1858,7 +2201,15 @@ describe('empty-group cascade is role-aware (T-035, M9)', () => {
   function columnDoc(): Doc {
     const doc = docWith(node('a', { x: 16, y: 52, w: 200, h: 120 }));
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 0, y: 0, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
     };
     doc.nodes['a']!.groupId = 'c1';
     return doc;

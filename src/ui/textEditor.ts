@@ -21,7 +21,12 @@
 
 import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
-import { columnRect, KANBAN_HEADER_H, KANBAN_PADDING } from '../core/kanban';
+import {
+  columnRect,
+  KANBAN_CHEVRON_SLOT,
+  KANBAN_HEADER_H,
+  KANBAN_PADDING,
+} from '../core/kanban';
 import { worldToScreen } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
@@ -121,22 +126,26 @@ export function createTextEditor(opts: TextEditorOptions): TextEditor {
     if (editingId === null && editingColumnId === null) return;
     if (editingColumnId !== null) {
       // T-037: over the column's header strip — the same rect the canvas
-      // renderer writes the name into (inset by the padding, the × zone
-      // reserved), so the editing view and the committed result agree.
+      // renderer writes the name into (inset by the padding, the chevron
+      // slot and the × zone reserved — T-039 shifted the name right of the
+      // chevron), so the editing view and the committed result agree.
       const group = docStore.get().groups[editingColumnId];
       if (!group) return;
       const rect = columnRect(group);
       if (rect === null) return;
       const cam = cameraStore.get();
       const topLeft = worldToScreen(cam, {
-        x: rect.x + KANBAN_PADDING,
+        x: rect.x + KANBAN_PADDING + KANBAN_CHEVRON_SLOT,
         y: rect.y,
       });
       host.style.transformOrigin = `${topLeft.x}px ${topLeft.y}px`;
       host.style.transform = `scale(${cam.zoom})`;
       host.style.left = `${topLeft.x}px`;
       host.style.top = `${topLeft.y}px`;
-      area.style.width = `${Math.max(24, rect.w - 2 * KANBAN_PADDING - 24)}px`;
+      area.style.width = `${Math.max(
+        24,
+        rect.w - 2 * KANBAN_PADDING - KANBAN_CHEVRON_SLOT - 24,
+      )}px`;
       area.style.height = `${KANBAN_HEADER_H}px`;
       area.style.borderRadius = '0px';
       area.style.clipPath = '';
