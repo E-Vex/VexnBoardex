@@ -28,6 +28,13 @@
  * release), and the kanban planner's target column is mirrored into the UI
  * store as the drop-target highlight while a card drag is in flight.
  *
+ * T-039 (collapse): a press on the header chevron arms a collapse/expand
+ * toggle — ONE `group.update` committed on release, the × precedent — and
+ * a press on a COLLAPSED column's rail arms a move like a header press
+ * (the whole rail is the header; its hidden members are never selected).
+ * The marquee skips hidden cards, exactly like the renderer and the
+ * hit-tests do — the painted board is the selectable board.
+ *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
  * a pan owns the pointer (`isPanActive`: Space held or actively panning —
@@ -48,11 +55,14 @@ import {
 } from '../core/hitTest';
 import {
   columnCloseHit,
+  columnCollapseHit,
   columnEffectiveRect,
   columnHeaderHit,
   columnResizeHit,
   columnResizeRect,
   dragMembersOf,
+  hiddenByCollapse,
+  isCollapsed,
   planColumnMove,
   planColumnResize,
   planKanbanDrop,
@@ -102,6 +112,16 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
    * paths (cancel, blur, a drag past the threshold) dispatch nothing,
    * exactly like every other gesture (D-26). */
   let pendingClose: {
+    pointerId: number;
+    columnId: Id;
+    screen: { x: number; y: number };
+  } | null = null;
+  /**
+   * An armed collapse-chevron press (T-039): the column collapses/expands
+   * on RELEASE — one `group.update`, one undo step. The same cancel paths
+   * as the × press disarm it silently (D-26).
+   */
+  let pendingCollapse: {
     pointerId: number;
     columnId: Id;
     screen: { x: number; y: number };
@@ -275,6 +295,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     for (const id of doc.order) {
       const node = doc.nodes[id];
       if (node === undefined) continue; // defensive: order is a permutation
+      // T-039: a hidden card is not painted and not clickable — the marquee
+      // never grabs one either (the painted board is the selectable board).
+      if (hiddenByCollapse(doc, node)) continue;
       if (
         rectsIntersect(
           { x: node.x, y: node.y, w: node.w, h: node.h },
@@ -374,6 +397,22 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       });
       return;
     }
+    // T-039: a press on a column's collapse chevron (screen-space target,
+    // sitting inside the header strip — checked BEFORE the header itself)
+    // arms a collapse/expand toggle. Committed on release, like the × (D-26).
+    const collapseHit = columnCollapseHit(
+      docStore.get(),
+      world,
+      cameraStore.get().zoom,
+    );
+    if (collapseHit !== null) {
+      pendingCollapse = {
+        pointerId: e.pointerId,
+        columnId: collapseHit,
+        screen,
+      };
+      return;
+    }
     // T-035: a press on a column's × close affordance arms a column delete
     // (group.delete — the cards survive, ungrouped). Committed on release,
     // like every gesture (D-26); cancel paths disarm silently.
@@ -437,16 +476,23 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     // members are selected up front, as a press anywhere inside the column
     // does. An empty column has no members to drag along — fall through to
     // the ordinary empty-space flow (marquee), unchanged.
+    // T-039: a COLLAPSED column's whole rail is its header — the press arms
+    // a move even with no members (the rail is the column's only
+    // affordance), and the hidden members are NEVER selected (an invisible
+    // selection would delete on a stray Delete press).
     if (hitId === null && hitEdgeId === null && e.button === 0 && !e.shiftKey) {
       const headerId = columnHeaderHit(docStore.get(), world);
       if (headerId !== null) {
         const doc = docStore.get();
+        const collapsed = isCollapsed(doc.groups[headerId]!);
         const members: Id[] = [];
-        for (const id of doc.order) {
-          if (doc.nodes[id]?.groupId === headerId) members.push(id);
+        if (!collapsed) {
+          for (const id of doc.order) {
+            if (doc.nodes[id]?.groupId === headerId) members.push(id);
+          }
         }
-        if (members.length > 0) {
-          uiStore.setSelection(members);
+        if (collapsed || members.length > 0) {
+          if (!collapsed) uiStore.setSelection(members);
           columnGesture = {
             pointerId: e.pointerId,
             columnId: headerId,
@@ -539,6 +585,30 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerUp(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    // T-039: release of an armed chevron press — toggle the collapse when
+    // the pointer stayed put (a click, D-26): ONE group.update, so the
+    // toggle is one undo step. A drag past the threshold disarms silently,
+    // like the × press.
+    if (pendingCollapse !== null && e.pointerId === pendingCollapse.pointerId) {
+      const { screen } = positions(e);
+      if (
+        Math.hypot(
+          screen.x - pendingCollapse.screen.x,
+          screen.y - pendingCollapse.screen.y,
+        ) < DRAG_THRESHOLD
+      ) {
+        const group = docStore.get().groups[pendingCollapse.columnId];
+        if (group !== undefined) {
+          docStore.dispatch({
+            type: 'group.update',
+            ids: [pendingCollapse.columnId],
+            patch: { collapsed: group.collapsed !== true },
+          });
+        }
+      }
+      pendingCollapse = null;
+      return;
+    }
     // T-035: release of an armed × close press — delete the column when the
     // pointer stayed put (a click, D-26); any drag past the threshold
     // disarms silently. Another pointer's release flows on to the machine.
@@ -593,6 +663,10 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerCancel(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    if (pendingCollapse !== null && e.pointerId === pendingCollapse.pointerId) {
+      pendingCollapse = null;
+      return;
+    }
     if (pendingClose !== null && e.pointerId === pendingClose.pointerId) {
       pendingClose = null;
       return;
@@ -647,6 +721,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onBlur(): void {
     pendingClose = null;
+    pendingCollapse = null; // T-039: blur disarms the toggle, no command
     endColumnGesture(); // T-037: blur cancels the column gesture, no command
     feed({ type: 'blur' });
   }
@@ -676,6 +751,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       }
       state = initialSelectState();
       pendingClose = null;
+      pendingCollapse = null; // T-039
       endColumnGesture(); // T-037
     },
   };
