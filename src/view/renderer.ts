@@ -19,7 +19,7 @@
  * nodes in this file — `visibleWorldRect` is used only for culling).
  */
 
-import type { Doc, Node, Edge, NodeShape } from '../core/types';
+import type { Doc, Id, Node, Edge, NodeShape } from '../core/types';
 import { rectContains, rectsIntersect, type Point } from '../core/geometry';
 import {
   edgePoints,
@@ -789,6 +789,7 @@ export function renderBoard(
     edgeSelection: [],
     columnDrag: null,
     columnResize: null,
+    columnReorder: null,
     kanbanDropTarget: null,
     editingColumn: null,
   },
@@ -848,6 +849,13 @@ export function renderBoard(
   const m = cameraToMatrix(camera);
   const columnDrag = ui.columnDrag;
   const columnResize = ui.columnResize;
+  // T-038: a reorder in flight shifts the PARTED columns horizontally —
+  // never the dragged one (it follows `columnDrag`, the raw gesture delta).
+  const columnReorder = ui.columnReorder;
+  const reorderShiftOf = (groupId: Id): number =>
+    columnReorder !== null && columnReorder.id !== groupId
+      ? (columnReorder.shifts[groupId] ?? 0)
+      : 0;
   ctx.save();
   ctx.transform(m.scale, 0, 0, m.scale, m.tx, m.ty);
   for (const [groupId, group] of Object.entries(doc.groups)) {
@@ -869,7 +877,9 @@ export function renderBoard(
           : columnRect(group);
       if (stored !== null) {
         const dx =
-          columnDrag !== null && columnDrag.id === groupId ? columnDrag.dx : 0;
+          (columnDrag !== null && columnDrag.id === groupId
+            ? columnDrag.dx
+            : 0) + reorderShiftOf(groupId);
         const dy =
           columnDrag !== null && columnDrag.id === groupId ? columnDrag.dy : 0;
         let rect: { x: number; y: number; w: number; h: number };
@@ -960,6 +970,11 @@ export function renderBoard(
       dx = columnDrag.dx;
       dy = columnDrag.dy;
     }
+    // T-038: a parted column's cards slide with their column (the dragged
+    // column's members follow `columnDrag` above — its shift is zero here).
+    if (!isDragged && node.groupId !== undefined) {
+      dx += reorderShiftOf(node.groupId);
+    }
     if (columnResize !== null && node.groupId === columnResize.id) {
       return {
         x: columnResize.x + KANBAN_PADDING + dx,
@@ -1044,6 +1059,10 @@ export function renderBoard(
     if (!isDragged && columnDrag !== null && node.groupId === columnDrag.id) {
       dx = columnDrag.dx;
       dy = columnDrag.dy;
+    }
+    // T-038: a parted column's cards slide with their column.
+    if (!isDragged && node.groupId !== undefined) {
+      dx += reorderShiftOf(node.groupId);
     }
     // A resize preview replaces the node's rect wholesale (T-021).
     const resized =
