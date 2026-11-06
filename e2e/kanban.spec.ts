@@ -576,4 +576,115 @@ test.describe('kanban — columns and card snapping @ 1280×720', () => {
     await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
   });
+
+  // ── T-040: column selection + F2 rename ─────────────────────────────────
+
+  // A To Do header probe (world (-200, -182)): inside the strip, clear of
+  // the name (which starts at world x -384), the × zone and every dot.
+  const TODO_HEADER_TINT: [number, number] = [440, 178];
+
+  test('20. clicking a header selects the column (tinted) — F2 renames it, one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — one seated card
+
+    // Before: the header strip paints the plain panel wash.
+    const panel = await panelColor(page);
+    expect(
+      sameColor(
+        await canvasPixel(page, TODO_HEADER_TINT[0], TODO_HEADER_TINT[1]),
+        panel,
+      ),
+    ).toBe(true);
+
+    // A header click selects the members (T-024) AND the column: the header
+    // strip now paints the selection tint.
+    await page.mouse.click(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await expect
+      .poll(async () =>
+        sameColor(
+          await canvasPixel(page, TODO_HEADER_TINT[0], TODO_HEADER_TINT[1]),
+          panel,
+        ),
+      )
+      .toBe(false);
+
+    // F2 opens the rename overlay on the selected column's name.
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await expect(page.locator('#vex-text-editor')).toHaveValue('To Do');
+
+    // Commit a new name: ONE group.update → rev 3, no node touched.
+    await page.keyboard.type('Backlog');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+
+    // The old double-click rename shows the committed name (unchanged path).
+    await page.mouse.dblclick(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Backlog');
+    await page.keyboard.press('Escape');
+
+    // ONE undo restores the old name.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await page.mouse.dblclick(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.locator('#vex-text-editor')).toHaveValue('To Do');
+    await page.keyboard.press('Escape');
+
+    // Clicking empty space clears the tint (and with it the F2 target).
+    await page.mouse.click(200, 360);
+    await expect
+      .poll(async () =>
+        sameColor(
+          await canvasPixel(page, TODO_HEADER_TINT[0], TODO_HEADER_TINT[1]),
+          panel,
+        ),
+      )
+      .toBe(true);
+  });
+
+  test('21. F2 targets the card when a card is selected, the column after a header press — never a gone column', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250], 'Task'); // rev 3 (batch + text)
+
+    // A selected CARD is the F2 target (T-020, unchanged).
+    await page.mouse.click(TODO_CARD_CENTRE[0], TODO_CARD_CENTRE[1]);
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Task');
+    await page.keyboard.press('Escape');
+
+    // After a header press the COLUMN wins (the tinted chrome is the target),
+    // even though the card is the single selected node.
+    await page.mouse.click(TODO_HEADER[0], TODO_HEADER[1]);
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toHaveValue('To Do');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+
+    // With nothing selected F2 does nothing at all.
+    await page.mouse.click(200, 360);
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toBeHidden();
+
+    // Deleting the SELECTED column (the ×) prunes the column selection:
+    // F2 falls through to the surviving card (still selected from the
+    // header press, ungrouped by the delete) — never to the gone column.
+    await page.mouse.click(TODO_HEADER[0], TODO_HEADER[1]);
+    await page.mouse.click(TODO_CLOSE[0], TODO_CLOSE[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await page.keyboard.press('F2');
+    await expect(page.locator('#vex-text-editor')).toBeVisible();
+    await expect(page.locator('#vex-text-editor')).toHaveValue('Task');
+    await page.keyboard.press('Escape');
+  });
 });
