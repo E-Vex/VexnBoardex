@@ -251,19 +251,16 @@ export function columnCloseHit(
 
 /**
  * The world point at the centre of a column's collapse chevron (T-039):
- * dead centre of the rail's top strip when collapsed, in the expanded
- * header's reserved left slot otherwise — the exact point
- * `columnCollapseHit` hit-tests and the renderer paints, so glyph and
- * target can never drift apart (the `columnClosePoint` rule).
+ * dead centre of the RAIL's top strip when collapsed, in the expanded
+ * header's reserved left slot otherwise. Takes the rect the column is
+ * PAINTED at (the stored/effective rect, or its in-flight drag preview), so
+ * the glyph and `columnCollapseHit`'s target can never drift apart — the
+ * `columnClosePoint` rule.
  */
-export function columnCollapsePoint(group: Group): Point | null {
-  if (isCollapsed(group)) {
-    const rail = columnRailRect(group);
-    if (rail === null) return null;
-    return { x: rail.x + rail.w / 2, y: rail.y + KANBAN_HEADER_H / 2 };
+export function columnCollapsePoint(rect: Rect, collapsed: boolean): Point {
+  if (collapsed) {
+    return { x: rect.x + rect.w / 2, y: rect.y + KANBAN_HEADER_H / 2 };
   }
-  const rect = columnRect(group);
-  if (rect === null) return null;
   return {
     x: rect.x + KANBAN_PADDING + KANBAN_CHEVRON_SLOT / 2,
     y: rect.y + KANBAN_HEADER_H / 2,
@@ -285,8 +282,9 @@ export function columnCollapseHit(
   if (!Number.isFinite(zoom) || zoom <= 0) return null;
   for (const [id, group] of Object.entries(doc.groups)) {
     if (!isColumn(group)) continue;
-    const cp = columnCollapsePoint(group);
-    if (cp === null) continue;
+    const rect = columnEffectiveRectOf(group, columnMembers(doc, id));
+    if (rect === null) continue;
+    const cp = columnCollapsePoint(rect, isCollapsed(group));
     const d = Math.hypot(point.x - cp.x, point.y - cp.y);
     if (d * zoom <= KANBAN_CHEVRON_HIT_RADIUS) return id;
   }

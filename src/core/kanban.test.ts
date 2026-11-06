@@ -813,20 +813,20 @@ describe('collapse — the rail geometry and hidden cards (T-039, M9)', () => {
   });
 
   it('columnCollapsePoint sits in the header slot expanded, the rail centre collapsed', () => {
-    expect(columnCollapsePoint(column('c1'))).toEqual({
+    const rect = columnRect(column('c1'))!;
+    expect(columnCollapsePoint(rect, false)).toEqual({
       x: KANBAN_PADDING + KANBAN_CHEVRON_SLOT / 2,
       y: KANBAN_HEADER_H / 2,
     });
-    expect(columnCollapsePoint({ ...column('c1'), collapsed: true })).toEqual({
-      x: KANBAN_COLLAPSED_W / 2,
-      y: KANBAN_HEADER_H / 2,
+    expect(columnCollapsePoint({ x: 10, y: 20, w: 36, h: 400 }, true)).toEqual({
+      x: 10 + KANBAN_COLLAPSED_W / 2,
+      y: 20 + KANBAN_HEADER_H / 2,
     });
-    expect(columnCollapsePoint({ id: 'g', name: 'frame' })).toBeNull();
   });
 
   it('columnCollapseHit works in screen space at any zoom', () => {
     const doc = board();
-    const expandedCp = columnCollapsePoint(column('c1'))!;
+    const expandedCp = columnCollapsePoint(columnRect(column('c1'))!, false);
     expect(columnCollapseHit(doc, expandedCp, 1)).toBe('c1');
     // The threshold is in SCREEN pixels: 5 world units at zoom 2 is 10 px
     // (the boundary, inclusive); 9 world units is 18 px — far out.
@@ -839,7 +839,7 @@ describe('collapse — the rail geometry and hidden cards (T-039, M9)', () => {
     expect(columnCollapseHit(doc, { x: 300, y: 300 }, 1)).toBeNull();
     // Collapsed: the same hit-test finds the rail chevron.
     doc.groups.c1!.collapsed = true;
-    const railCp = columnCollapsePoint(doc.groups.c1!)!;
+    const railCp = columnCollapsePoint(columnRailRect(doc.groups.c1!)!, true);
     expect(columnCollapseHit(doc, railCp, 1)).toBe('c1');
   });
 
