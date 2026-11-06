@@ -19,13 +19,11 @@
  * - T-037: the column's EFFECTIVE rect (the stored height grown to fit its
  *   cards — auto-grow), the header/resize affordance hit-tests, and the
  *   column move/resize plans (ONE batch each, cards follow the column).
- * - T-038: the column REORDER plan — a header drag that pushes into another
- *   column parts the board Trello-style and seats the column in the gap.
  *
  * Planning never mutates the document; the caller dispatches the command.
  */
 
-import { rectContains, rectsIntersect } from './geometry';
+import { rectContains } from './geometry';
 import type { Point, Rect } from './geometry';
 import { newNode } from './nodeDefaults';
 import type { Command, Doc, Group, Id, Node } from './types';
@@ -692,156 +690,6 @@ export function planColumnResize(doc: Doc, columnId: Id, rect: Rect): Command {
       y: card.y,
       w: inner,
       h: card.h,
-    });
-  }
-  return { type: 'batch', commands };
-}
-
-// ── Column reorder planning (T-038) ─────────────────────────────────────────
-
-/** A planned column reorder (T-038): where the dragged column lands and how
- * far the other columns slide to open the gap — the geometry the renderer
- * previews while the gesture is live and the commit seals on release. */
-export interface ColumnReorderPlan {
-  /** The dragged column's landing x — the gap's left edge (world units). */
-  x: number;
-  /** Horizontal shifts for every OTHER column that moves (world units),
-   * in board order left → right; columns that keep their x are absent. */
-  shifts: Array<{ id: Id; dx: number }>;
-}
-
-/**
- * Plan the reorder a column drag previews (T-038, M9 — kanban polish),
- * Trello-style: while the dragged column's preview rect pushes into another
- * column of the board, the others part to open a gap and the release seats
- * the column in it. Null when the drag stays a FREE move (T-037) — no
- * intersection with another column (dragging clear of the row, or the only
- * column on the board). Pure: reads `doc`, never mutates.
- *
- * The rules, the card slots (T-035) turned sideways:
- * - The board is every column of the document (the `planKanbanBoard`
- *   precedent: one logical board, it grows to the right).
- * - Engagement: the preview rect INTERSECTS another column's effective
- *   rect — pushing into a panel's space reorders; a vertical exit from the
- *   row (no overlap left) stays free, so a board can still be arranged
- *   free-form by dragging its columns out of the row first.
- * - Insertion index: centre-vs-centre on x, the card rule — the dragged
- *   column lands right of every column whose centre is at or left of its
- *   own preview centre.
- * - Reflow: the new order runs left → right from the board's ORIGINAL
- *   left edge, compact (variable widths, `KANBAN_COLUMN_GAP` seams) — the
- *   board keeps its span however the order permutes. Each column keeps
- *   its y; only x reflows.
- */
-export function columnReorderPlan(
-  doc: Doc,
-  columnId: Id,
-  dx: number,
-  dy: number,
-): ColumnReorderPlan | null {
-  const group = doc.groups[columnId];
-  if (group === undefined || !isColumn(group)) return null;
-  const own = columnEffectiveRectOf(group, columnMembers(doc, columnId));
-  if (own === null) return null; // defensive (validateDoc guarantees geometry)
-  const preview: Rect = { x: own.x + dx, y: own.y + dy, w: own.w, h: own.h };
-
-  // The other columns of the board, left → right (a stable sort keeps
-  // insertion order on x ties, so the plan is deterministic for any doc).
-  const others: Array<{ id: Id; rect: Rect }> = [];
-  for (const g of columnsOf(doc)) {
-    if (g.id === columnId) continue;
-    const rect = columnEffectiveRectOf(g, columnMembers(doc, g.id));
-    if (rect !== null) others.push({ id: g.id, rect });
-  }
-  if (others.length === 0) return null;
-  others.sort((a, b) => a.rect.x - b.rect.x);
-
-  // Engagement: the preview must push into another panel's space.
-  if (!others.some(({ rect }) => rectsIntersect(preview, rect))) return null;
-
-  // Insertion index: centre-vs-centre, the card rule sideways.
-  const centerX = preview.x + preview.w / 2;
-  let index = 0;
-  for (const { rect } of others) {
-    if (rect.x + rect.w / 2 <= centerX) index++;
-  }
-
-  // Compact reflow from the board's original left edge — the dragged
-  // column's slot counts, so a leftmost column dragged right leaves the
-  // edge where it was and the others fill left (Trello).
-  const x0 = Math.min(own.x, ...others.map(({ rect }) => rect.x));
-  const shifts: Array<{ id: Id; dx: number }> = [];
-  let x = x0;
-  for (let i = 0; i < index; i++) {
-    const o = others[i]!;
-    if (o.rect.x !== x) shifts.push({ id: o.id, dx: x - o.rect.x });
-    x += o.rect.w + KANBAN_COLUMN_GAP;
-  }
-  const landing = x;
-  x += own.w + KANBAN_COLUMN_GAP;
-  for (let i = index; i < others.length; i++) {
-    const o = others[i]!;
-    if (o.rect.x !== x) shifts.push({ id: o.id, dx: x - o.rect.x });
-    x += o.rect.w + KANBAN_COLUMN_GAP;
-  }
-  return { x: landing, shifts };
-}
-
-/**
- * Plan the commit of a column drag that reorders (T-038): the dragged
- * column SEALS into the gap — x snaps to the reflow slot, y keeps the RAW
- * gesture delta (the row governs horizontal seating; vertical placement
- * stays free-form) — and every parted column slides to its reflow x, its
- * cards following. ONE batch = one undo step (I-04). A drag that engages
- * but seats exactly where it already was compiles to an EMPTY batch — the
- * store treats it as the no-op it is (no revision, no history entry).
- * Null when the drag is a free move (see `columnReorderPlan`) — the caller
- * falls back to `planColumnMove`. Pure; the caller dispatches on pointer-up.
- */
-export function planColumnReorder(
-  doc: Doc,
-  columnId: Id,
-  dx: number,
-  dy: number,
-): Command | null {
-  const plan = columnReorderPlan(doc, columnId, dx, dy);
-  if (plan === null) return null;
-  const group = doc.groups[columnId]!;
-  const snapDx = plan.x - group.x!;
-  const commands: Command[] = [];
-  // The dragged column and its cards: x snaps to the gap, y keeps the raw
-  // gesture delta (planColumnMove semantics for everything but the x).
-  if (snapDx !== 0 || dy !== 0) {
-    const members = columnMembers(doc, columnId);
-    if (members.length > 0) {
-      commands.push({
-        type: 'node.move',
-        ids: members.map((n) => n.id),
-        dx: snapDx,
-        dy,
-      });
-    }
-    commands.push({
-      type: 'group.update',
-      ids: [columnId],
-      patch: { x: plan.x, y: group.y! + dy },
-    });
-  }
-  // The parted columns slide to their reflow x; their cards follow.
-  for (const shift of plan.shifts) {
-    const members = columnMembers(doc, shift.id);
-    if (members.length > 0) {
-      commands.push({
-        type: 'node.move',
-        ids: members.map((n) => n.id),
-        dx: shift.dx,
-        dy: 0,
-      });
-    }
-    commands.push({
-      type: 'group.update',
-      ids: [shift.id],
-      patch: { x: doc.groups[shift.id]!.x! + shift.dx },
     });
   }
   return { type: 'batch', commands };
