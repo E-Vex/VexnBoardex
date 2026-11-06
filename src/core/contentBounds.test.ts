@@ -19,7 +19,10 @@ function node(id: string, x: number, y: number, w = 10, h = 10): Node {
   };
 }
 
-function docOf(nodes: Node[], groups: Record<string, { id: string; name: string }> = {}): Doc {
+function docOf(
+  nodes: Node[],
+  groups: Record<string, { id: string; name: string }> = {},
+): Doc {
   return {
     nodes: Object.fromEntries(nodes.map((n) => [n.id, n])),
     edges: {},
@@ -49,10 +52,7 @@ describe('contentBounds', () => {
   });
 
   it('is the union, not the bounding hull of centres', () => {
-    const doc = docOf([
-      node('a', 0, 0, 100, 1),
-      node('b', 90, 50, 10, 10),
-    ]);
+    const doc = docOf([node('a', 0, 0, 100, 1), node('b', 90, 50, 10, 10)]);
     // x: 0 … 100, y: 0 … 60
     expect(contentBounds(doc)).toEqual({ x: 0, y: 0, w: 100, h: 60 });
   });
@@ -88,5 +88,28 @@ describe('contentBounds', () => {
       empty: { id: 'empty', name: 'E' },
     });
     expect(contentBounds(doc)).toEqual({ x: 5, y: 5, w: 10, h: 10 });
+  });
+
+  it('a collapsed column hides its cards from the bounds — the rail bounds it (T-039)', () => {
+    // A far-flung seated card: it would bound the export were it painted.
+    const doc = docOf([node('a', 500, 500, 40, 40)]);
+    doc.groups = {
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+        collapsed: true,
+      },
+    };
+    doc.nodes['a']!.groupId = 'c1';
+    // Only the rail (the collapsed column's frame) contributes.
+    expect(contentBounds(doc)).toEqual({ x: 0, y: 0, w: 36, h: 400 });
+    // Expanded again, the card bounds it once more.
+    doc.groups.c1!.collapsed = false;
+    expect(contentBounds(doc)).toEqual({ x: 0, y: 0, w: 540, h: 540 });
   });
 });

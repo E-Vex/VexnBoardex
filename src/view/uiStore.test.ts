@@ -46,6 +46,7 @@ describe('createUiStore — initial state (R3)', () => {
       edgeSelection: [],
       columnDrag: null,
       columnResize: null,
+      columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
       columnSelection: null,
@@ -66,6 +67,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       edgeSelection: [],
       columnDrag: null,
       columnResize: null,
+      columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
       columnSelection: null,
@@ -116,6 +118,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       edgeSelection: [],
       columnDrag: null,
       columnResize: null,
+      columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
       columnSelection: null,
@@ -196,6 +199,7 @@ describe('setDrag — notify only on real change (R3)', () => {
       edgeSelection: [],
       columnDrag: null,
       columnResize: null,
+      columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
       columnSelection: null,
@@ -461,6 +465,45 @@ describe('column previews and kanban UI state (T-037)', () => {
     store.setEditingColumn(null);
     expect(store.get().editingColumn).toBeNull();
     expect(fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('column reorder preview (T-038)', () => {
+  it('setColumnReorder stores the shifts and notifies once', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnReorder({ id: 'c1', shifts: { c2: -280 } });
+    expect(store.get().columnReorder).toEqual({
+      id: 'c1',
+      shifts: { c2: -280 },
+    });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('equal shifts (any key order) are not a change; a value or key edit is', () => {
+    const store = createUiStore();
+    store.setColumnReorder({ id: 'c1', shifts: { c2: -280, c3: 40 } });
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnReorder({ id: 'c1', shifts: { c3: 40, c2: -280 } });
+    expect(fn).not.toHaveBeenCalled();
+    store.setColumnReorder({ id: 'c1', shifts: { c2: -200, c3: 40 } });
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setColumnReorder({ id: 'c1', shifts: { c2: -200 } });
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a different dragged column or null is a change; null clears', () => {
+    const store = createUiStore();
+    store.setColumnReorder({ id: 'c1', shifts: { c2: -280 } });
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnReorder({ id: 'c2', shifts: { c2: -280 } });
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setColumnReorder(null);
+    expect(store.get().columnReorder).toBeNull();
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });
 

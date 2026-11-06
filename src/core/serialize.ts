@@ -14,7 +14,17 @@
  * and every repair is reported.
  */
 
-import type { Doc, Node, Edge, Group, Id, NodeKind, NodeShape, EdgeRoute, Anchor } from './types';
+import type {
+  Doc,
+  Node,
+  Edge,
+  Group,
+  Id,
+  NodeKind,
+  NodeShape,
+  EdgeRoute,
+  Anchor,
+} from './types';
 import { validateDoc } from './doc';
 
 /** Current file format version. Increment when making breaking changes. */
@@ -49,7 +59,10 @@ const migrations: Migration[] = [
  * Serialize a document (and optional view) to a JSON string (T-012).
  * The output is a valid FileEnvelope with the current FILE_VERSION.
  */
-export function serializeDoc(doc: Doc, view?: { x: number; y: number; zoom: number }): string {
+export function serializeDoc(
+  doc: Doc,
+  view?: { x: number; y: number; zoom: number },
+): string {
   const envelope: FileEnvelope = {
     app: 'vexboard',
     version: FILE_VERSION,
@@ -72,14 +85,19 @@ export function deserializeDoc(json: string): LoadResult {
     const parsed = JSON.parse(json);
     envelope = parsed as FileEnvelope;
   } catch (e) {
-    throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(
+      `Invalid JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   // Validate envelope structure.
   if (envelope.app !== 'vexboard') {
     warnings.push(`Unknown app "${envelope.app}", expected "vexboard"`);
   }
-  if (typeof envelope.version !== 'number' || !Number.isFinite(envelope.version)) {
+  if (
+    typeof envelope.version !== 'number' ||
+    !Number.isFinite(envelope.version)
+  ) {
     warnings.push('Missing or invalid version, assuming 1');
     envelope.version = 1;
   }
@@ -92,14 +110,18 @@ export function deserializeDoc(json: string): LoadResult {
   while (currentVersion < FILE_VERSION) {
     const migration = migrations[currentVersion - 1];
     if (!migration) {
-      warnings.push(`No migration from v${currentVersion} to v${currentVersion + 1}`);
+      warnings.push(
+        `No migration from v${currentVersion} to v${currentVersion + 1}`,
+      );
       break;
     }
     try {
       envelope = migration(envelope);
       currentVersion++;
     } catch (e) {
-      warnings.push(`Migration v${currentVersion}→v${currentVersion + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
+      warnings.push(
+        `Migration v${currentVersion}→v${currentVersion + 1} failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
       break;
     }
   }
@@ -119,7 +141,12 @@ export function deserializeDoc(json: string): LoadResult {
  * Performs minimal normalization without full validation.
  */
 export function coerceDoc(obj: unknown): Doc {
-  const doc = obj as Partial<Doc> & { nodes?: Record<string, unknown>; edges?: Record<string, unknown>; groups?: Record<string, unknown>; order?: unknown[] };
+  const doc = obj as Partial<Doc> & {
+    nodes?: Record<string, unknown>;
+    edges?: Record<string, unknown>;
+    groups?: Record<string, unknown>;
+    order?: unknown[];
+  };
   const nodes: Record<Id, Node> = {};
   const edges: Record<Id, Edge> = {};
   const groups: Record<Id, Group> = {};
@@ -133,11 +160,19 @@ export function coerceDoc(obj: unknown): Doc {
         kind: (n.kind as NodeKind) || 'card',
         x: typeof n.x === 'number' && Number.isFinite(n.x) ? n.x : 0,
         y: typeof n.y === 'number' && Number.isFinite(n.y) ? n.y : 0,
-        w: typeof n.w === 'number' && Number.isFinite(n.w) && n.w > 0 ? n.w : 200,
-        h: typeof n.h === 'number' && Number.isFinite(n.h) && n.h > 0 ? n.h : 120,
+        w:
+          typeof n.w === 'number' && Number.isFinite(n.w) && n.w > 0
+            ? n.w
+            : 200,
+        h:
+          typeof n.h === 'number' && Number.isFinite(n.h) && n.h > 0
+            ? n.h
+            : 120,
         text: typeof n.text === 'string' ? n.text : '',
         color: typeof n.color === 'string' ? n.color : '#ffffff',
-        tags: Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === 'string') : [],
+        tags: Array.isArray(n.tags)
+          ? n.tags.filter((t): t is string => typeof t === 'string')
+          : [],
         groupId: typeof n.groupId === 'string' ? n.groupId : undefined,
         src: typeof n.src === 'string' ? n.src : undefined,
         // T-032: the shape passes through when it is one of the four (a
@@ -159,7 +194,12 @@ export function coerceDoc(obj: unknown): Doc {
       const e = edge as unknown as Record<string, unknown>;
       const from = e.from as Record<string, unknown> | undefined;
       const to = e.to as Record<string, unknown> | undefined;
-      if (from && to && typeof from.node === 'string' && typeof to.node === 'string') {
+      if (
+        from &&
+        to &&
+        typeof from.node === 'string' &&
+        typeof to.node === 'string'
+      ) {
         edges[id] = {
           id,
           from: {
@@ -197,7 +237,9 @@ export function coerceDoc(obj: unknown): Doc {
         const geo =
           [g.x, g.y, g.w, g.h].every(
             (v) => typeof v === 'number' && Number.isFinite(v),
-          ) && (g.w as number) > 0 && (g.h as number) > 0;
+          ) &&
+          (g.w as number) > 0 &&
+          (g.h as number) > 0;
         groups[id] =
           role !== undefined && geo
             ? {
@@ -208,6 +250,11 @@ export function coerceDoc(obj: unknown): Doc {
                 y: g.y as number,
                 w: g.w as number,
                 h: g.h as number,
+                // T-039: the collapse flag passes through when TRUE — absent
+                // means expanded, so a false or non-boolean value is dropped
+                // (the same normalisation `group.update` applies; a migration
+                // must produce a valid, normalised document).
+                ...(g.collapsed === true ? { collapsed: true } : {}),
               }
             : { id, name: g.name };
       }

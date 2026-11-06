@@ -99,10 +99,7 @@ describe('hitTest — misses (R1)', () => {
   });
 
   it('a point outside all nodes returns null', () => {
-    const doc = docOf(
-      node('a', { x: 0, y: 0 }),
-      node('b', { x: 200, y: 200 }),
-    );
+    const doc = docOf(node('a', { x: 0, y: 0 }), node('b', { x: 200, y: 200 }));
     expect(hitTest(doc, { x: 150, y: 100 })).toBeNull();
     expect(hitTest(doc, { x: -1, y: -1 })).toBeNull();
   });
@@ -132,7 +129,7 @@ describe('hitTestWithHandles — selection scope (T-018)', () => {
     expect(hit).toEqual({ type: 'node', id: 'a' });
   });
 
-  it('handles of a selected node win over another selected node\'s body', () => {
+  it("handles of a selected node win over another selected node's body", () => {
     const d = doc2();
     // b's left handle sits at world (400, 40); with both selected, the
     // top-most (b) is scanned first and its handle wins.
@@ -179,16 +176,24 @@ describe('hitTestResizeHandles — corner hit-testing (T-021)', () => {
   it('each corner of the single selected node is hit', () => {
     const d = doc1();
     expect(hitTestResizeHandles(d, { x: 0, y: 0 }, cam, ['a'])).toEqual({
-      type: 'resize', id: 'a', corner: 'nw',
+      type: 'resize',
+      id: 'a',
+      corner: 'nw',
     });
     expect(hitTestResizeHandles(d, { x: 200, y: 0 }, cam, ['a'])).toEqual({
-      type: 'resize', id: 'a', corner: 'ne',
+      type: 'resize',
+      id: 'a',
+      corner: 'ne',
     });
     expect(hitTestResizeHandles(d, { x: 0, y: 80 }, cam, ['a'])).toEqual({
-      type: 'resize', id: 'a', corner: 'sw',
+      type: 'resize',
+      id: 'a',
+      corner: 'sw',
     });
     expect(hitTestResizeHandles(d, { x: 200, y: 80 }, cam, ['a'])).toEqual({
-      type: 'resize', id: 'a', corner: 'se',
+      type: 'resize',
+      id: 'a',
+      corner: 'se',
     });
   });
 
@@ -199,7 +204,9 @@ describe('hitTestResizeHandles — corner hit-testing (T-021)', () => {
       node('a', { x: 0, y: 0, w: 200, h: 80 }),
       node('b', { x: 400, y: 0, w: 200, h: 80 }),
     );
-    expect(hitTestResizeHandles(d2, { x: 0, y: 0 }, cam, ['a', 'b'])).toBeNull();
+    expect(
+      hitTestResizeHandles(d2, { x: 0, y: 0 }, cam, ['a', 'b']),
+    ).toBeNull();
   });
 
   it('a point inside the body but away from corners is not a resize hit', () => {
@@ -296,7 +303,15 @@ describe('groupFrameRect — kanban columns (T-035, M9)', () => {
   it("a column's frame IS its stored geometry, memberless or not", () => {
     const doc = docOf();
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 10,
+        y: 20,
+        w: 240,
+        h: 400,
+      },
     };
     expect(groupFrameRect(doc, 'c1')).toEqual({ x: 10, y: 20, w: 240, h: 400 });
   });
@@ -304,7 +319,15 @@ describe('groupFrameRect — kanban columns (T-035, M9)', () => {
   it('a column with members still uses the stored rect (not the member bbox)', () => {
     const doc = docOf(node('a', { x: 26, y: 72, w: 200, h: 120 }));
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 10,
+        y: 20,
+        w: 240,
+        h: 400,
+      },
     };
     doc.nodes.a!.groupId = 'c1';
     expect(groupFrameRect(doc, 'c1')).toEqual({ x: 10, y: 20, w: 240, h: 400 });
@@ -313,7 +336,15 @@ describe('groupFrameRect — kanban columns (T-035, M9)', () => {
   it('groupFrameAt resolves clicks inside the column rect', () => {
     const doc = docOf();
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: 10, y: 20, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 10,
+        y: 20,
+        w: 240,
+        h: 400,
+      },
     };
     expect(groupFrameAt(doc, { x: 15, y: 25 })).toBe('c1');
     expect(groupFrameAt(doc, { x: 5, y: 15 })).toBeNull(); // outside
@@ -330,5 +361,80 @@ describe('groupFrameRect — kanban columns (T-035, M9)', () => {
       h: 50 + GROUP_FRAME_PADDING * 2,
     });
     expect(groupFrameRect(doc, 'nope')).toBeNull();
+  });
+});
+
+describe('hidden cards of collapsed columns (T-039, M9)', () => {
+  /** a (seated card of c1), b (free node); c1 collapsed on demand. */
+  function docWithCollapsedColumn(collapsed: boolean): Doc {
+    const doc = docOf(
+      node('a', { x: 26, y: 72, w: 200, h: 120 }),
+      node('b', { x: 600, y: 0 }),
+    );
+    doc.groups = {
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 10,
+        y: 20,
+        w: 240,
+        h: 400,
+        ...(collapsed ? { collapsed: true } : {}),
+      },
+    };
+    doc.nodes.a!.groupId = 'c1';
+    doc.edges['e1'] = {
+      id: 'e1',
+      from: { node: 'a', anchor: 'auto' },
+      to: { node: 'b', anchor: 'auto' },
+    };
+    return doc;
+  }
+
+  it('hitTest skips a hidden card and finds it again once expanded', () => {
+    const collapsed = docWithCollapsedColumn(true);
+    expect(hitTest(collapsed, { x: 100, y: 100 })).toBeNull(); // card a hidden
+    expect(hitTest(collapsed, { x: 650, y: 10 })).toBe('b'); // free node fine
+    const expanded = docWithCollapsedColumn(false);
+    expect(hitTest(expanded, { x: 100, y: 100 })).toBe('a');
+  });
+
+  it('hitTestWithHandles skips a hidden selected node’s handles', () => {
+    const collapsed = docWithCollapsedColumn(true);
+    const camera = { x: 0, y: 0, zoom: 1 };
+    const topHandle = { x: 26 + 100, y: 72 }; // a's top-edge midpoint
+    expect(hitTestWithHandles(collapsed, topHandle, camera, ['a'])).toBeNull();
+    const expanded = docWithCollapsedColumn(false);
+    expect(hitTestWithHandles(expanded, topHandle, camera, ['a'])).toEqual({
+      type: 'handle',
+      id: 'a',
+      anchor: 'top',
+    });
+  });
+
+  it('edgeAt skips an edge touching a hidden card', () => {
+    const collapsed = docWithCollapsedColumn(true);
+    // The straight route (226,132)→(600,25) — probe its midpoint.
+    expect(edgeAt(collapsed, { x: 400, y: 80 }, 1)).toBeNull();
+    const expanded = docWithCollapsedColumn(false);
+    expect(edgeAt(expanded, { x: 400, y: 80 }, 1)).toBe('e1');
+  });
+
+  it('groupFrameRect of a collapsed column is its rail (the effective rect)', () => {
+    const collapsed = docWithCollapsedColumn(true);
+    expect(groupFrameRect(collapsed, 'c1')).toEqual({
+      x: 10,
+      y: 20,
+      w: 36,
+      h: 400,
+    });
+    const expanded = docWithCollapsedColumn(false);
+    expect(groupFrameRect(expanded, 'c1')).toEqual({
+      x: 10,
+      y: 20,
+      w: 240,
+      h: 400,
+    });
   });
 });

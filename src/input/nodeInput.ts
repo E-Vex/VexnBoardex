@@ -22,13 +22,17 @@
  * below the header strip) renames the column instead: the text overlay
  * opens on the name (ONE `group.update` per commit). It still creates a
  * card when the click lands below the header, inside the column body.
+ *
+ * T-039: a double-click on a COLLAPSED rail EXPANDS the column (ONE
+ * `group.update`, one undo step) — the rail is the header, tucked away;
+ * the rename overlay needs the expanded header strip to sit on.
  */
 
 import type { Point } from '../core/geometry';
 import type { DocStore } from '../core/store';
 import type { Id } from '../core/types';
 import { hitTest } from '../core/hitTest';
-import { columnHeaderHit, planKanbanCreate } from '../core/kanban';
+import { columnHeaderHit, isCollapsed, planKanbanCreate } from '../core/kanban';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
 import type { UiStore } from '../view/uiStore';
@@ -102,9 +106,20 @@ export function attachNodeInput(opts: NodeInputOptions): NodeInput {
     // header is empty of nodes — cards seat below it, so `hitTest` missed).
     // Before the create planner: below the header, inside the column body,
     // a double-click still creates a seated card.
+    // T-039: a double-click on a COLLAPSED rail expands the column instead —
+    // the whole rail is the header, and the rename overlay has no strip to
+    // sit on until the column is expanded again.
     const header = columnHeaderHit(docStore.get(), world);
     if (header !== null) {
-      editColumn?.(header);
+      if (isCollapsed(docStore.get().groups[header]!)) {
+        docStore.dispatch({
+          type: 'group.update',
+          ids: [header],
+          patch: { collapsed: false },
+        });
+      } else {
+        editColumn?.(header);
+      }
       return;
     }
     const id = newId();

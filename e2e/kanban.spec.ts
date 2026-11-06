@@ -576,14 +576,244 @@ test.describe('kanban — columns and card snapping @ 1280×720', () => {
     await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
     await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
   });
+  test('15. dragging a column past its neighbour SWAPS them — the board parts live, one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — card A in To Do
+    await createCardInTodo(page, [636, 250]); // rev 3 — card B in Doing
 
+    // Give card B a distinct colour (mint) — the swap is told apart by
+    // pixels, black-box (select B, pick the third swatch).
+    await page.mouse.click(DOING_SLOT0_CENTRE[0], DOING_SLOT0_CENTRE[1]);
+    await page.locator('[data-testid="swatch"]').nth(2).click();
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    const colorA = await canvasPixel(page, 300, 310); // card A fill (pale blue)
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 555, 310), colorA))
+      .toBe(false); // card B's fill differs now
+    const colorB = await canvasPixel(page, 555, 310);
+
+    // Drag the To Do header right past Doing's centre (+320 screen px).
+    await page.mouse.move(TODO_HEADER[0], TODO_HEADER[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_HEADER[0] + 320, TODO_HEADER[1], { steps: 10 });
+
+    // Mid-drag the board has PARTED: card B already sits in To Do's old
+    // slot (its mint fill arrives at the pale-blue slot's interior)…
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 300, 310), colorB))
+      .toBe(true);
+    // …Doing's old slot is bare (the gap moved in)…
+    await expectCleared(page, 555, 310);
+    // …and the dragged column previews past Doing's old home.
+    await expectPainted(page, 770, 310);
+
+    await page.mouse.up();
+    // ONE batch: the whole reflow — both columns, both cards — is one step.
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 5');
+    await expect(page.getByTestId('hud-selected')).toHaveText('selected 1');
+
+    // Seated: card A now fills Doing's old slot…
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 555, 310), colorA))
+      .toBe(true);
+    // …and card B fills To Do's old slot — the order really swapped.
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 300, 310), colorB))
+      .toBe(true);
+
+    // ONE undo restores the original order exactly.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 6');
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 555, 310), colorB))
+      .toBe(true);
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 300, 310), colorA))
+      .toBe(true);
+    await expectCleared(page, 770, 310);
+  });
+
+  test('16. an overlap that crosses no centre seats the column back home — no revision at all', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — one seated card
+    const panel = await panelColor(page); // read BEFORE the drag moves To Do
+
+    // Drag right by 150: the preview pushes into Doing, but To Do's centre
+    // (screen 360) stays left of Doing's (640) — the order cannot change.
+    await page.mouse.move(TODO_HEADER[0], TODO_HEADER[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_HEADER[0] + 150, TODO_HEADER[1], { steps: 10 });
+
+    // Mid-drag the preview follows the cursor (card A past the old edge)…
+    await expectPainted(page, 500, 300);
+    // …while Doing keeps its panel wash where it always was — probe
+    // (700, 510): inside Doing, clear of the To Do preview (ends at 630),
+    // so a single wash, not the doubled one where they overlap.
+    await expect
+      .poll(async () => sameColor(await canvasPixel(page, 700, 510), panel))
+      .toBe(true);
+
+    await page.mouse.up();
+    // Seated home: the batch is EMPTY — no revision, no history entry.
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+    // The column snapped back to its own slot.
+    await expectCleared(page, 500, 300);
+    await expectPanel(page, TODO_PANEL[0], TODO_PANEL[1]);
+  });
+  // ── T-039: collapsible columns ──────────────────────────────────────────
+
+  // The To Do header's ‹ chevron (world (-374, -182)), left of the name.
+  const TODO_CHEVRON: [number, number] = [266, 178];
+  // The › chevron of To Do's COLLAPSED rail (world (-382, -182)).
+  const TODO_RAIL_CHEVRON: [number, number] = [258, 178];
+  // The rail's interior, below the chevron strip and clear of the rotated
+  // name (world (-382, 20)).
+  const TODO_RAIL: [number, number] = [258, 380];
+  // The middle of the rail (world (-382, -60)) — a dblclick target.
+  const TODO_RAIL_CENTRE: [number, number] = [258, 300];
+  // To Do's former panel body, right of the rail and below the seated card
+  // (world (-240, 150)).
+  const TODO_BODY: [number, number] = [400, 510];
+
+  test('17. clicking the header chevron collapses the column to a rail — one undo restores', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2 — one seated card
+
+    // Click the ‹ chevron: ONE group.update → rev 3.
+    await page.mouse.click(TODO_CHEVRON[0], TODO_CHEVRON[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+
+    // The rail is painted at the column's left edge…
+    await expectPainted(page, TODO_RAIL[0], TODO_RAIL[1]);
+    // …the panel body is bare background again…
+    await expectCleared(page, TODO_BODY[0], TODO_BODY[1]);
+    // …and the seated card is hidden (not deleted).
+    await expectCleared(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+    // The Doing column is untouched by the collapse.
+    await expectPainted(page, DOING_PANEL[0], DOING_PANEL[1]);
+
+    // The × is gone with the panel: a click where it used to live hits
+    // empty space (a marquee), not a delete — the revision stands.
+    await page.mouse.click(TODO_CLOSE[0], TODO_CLOSE[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 3');
+    await expectPainted(page, TODO_RAIL[0], TODO_RAIL[1]);
+
+    // ONE undo expands the column: the card returns to its exact slot.
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expectCard(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+    await expectPainted(page, TODO_BODY[0], TODO_BODY[1]);
+  });
+
+  test('18. clicking the rail’s chevron expands the column again; the cards return', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2
+    await page.mouse.click(TODO_CHEVRON[0], TODO_CHEVRON[1]); // rev 3 — collapsed
+
+    // The rail's › chevron expands (ONE group.update → rev 4).
+    await page.mouse.click(TODO_RAIL_CHEVRON[0], TODO_RAIL_CHEVRON[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    // The panel and the seated card are back exactly where they were.
+    await expectPainted(page, TODO_BODY[0], TODO_BODY[1]);
+    await expectCard(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+    // The rail-only strip is panel again (the column grew back).
+    await expectPainted(page, TODO_RAIL[0], TODO_RAIL[1]);
+  });
+
+  test('19. a double-click on the rail expands the column too', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2
+    await page.mouse.click(TODO_CHEVRON[0], TODO_CHEVRON[1]); // rev 3 — collapsed
+
+    // Double-click the middle of the rail: the two single clicks arm and
+    // disarm a move gesture (no command, D-26); the dblclick expands — ONE
+    // group.update → rev 4, not 5.
+    await page.mouse.dblclick(TODO_RAIL_CENTRE[0], TODO_RAIL_CENTRE[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+    await expectCard(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+    await expectPainted(page, TODO_BODY[0], TODO_BODY[1]);
+  });
+
+  test('20. dragging a collapsed rail moves the column — the cards follow it', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2
+    await page.mouse.click(TODO_CHEVRON[0], TODO_CHEVRON[1]); // rev 3 — collapsed
+
+    // Drag the rail DOWN by 200 world units.
+    await page.mouse.move(TODO_RAIL_CENTRE[0], TODO_RAIL_CENTRE[1]);
+    await page.mouse.down();
+    await page.mouse.move(TODO_RAIL_CENTRE[0], TODO_RAIL_CENTRE[1] + 200, {
+      steps: 10,
+    });
+    // Mid-drag the PREVIEW is already at the destination…
+    await expectPainted(page, TODO_RAIL_CENTRE[0], TODO_RAIL_CENTRE[1] + 200);
+    // …and the rail's old spot is bare background.
+    await expectCleared(page, TODO_RAIL_CENTRE[0], TODO_RAIL_CENTRE[1]);
+
+    await page.mouse.up();
+    // ONE batch: the stored geometry AND the hidden card moved together.
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 4');
+
+    // Expand at the rail's NEW position (world (-382, 18) → screen (258, 378)):
+    // the › chevron sits at the top of the moved rail.
+    await page.mouse.click(TODO_RAIL_CHEVRON[0], TODO_RAIL_CHEVRON[1] + 200);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 5');
+    // The card followed: world (-240, 110) → screen (400, 470) — the moved
+    // column's body, where the seated card now paints.
+    await expectCard(page, 400, 470);
+  });
+
+  test('21. a reload keeps the collapsed state — and the cards behind it (autosave)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await createBoard(page);
+    await createCardInTodo(page, [356, 250]); // rev 2
+    await page.mouse.click(TODO_CHEVRON[0], TODO_CHEVRON[1]); // rev 3 — collapsed
+
+    // Wait out the 1s autosave debounce, then reload.
+    await page.waitForTimeout(1600);
+    await page.reload();
+
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 1');
+    await expect(page.getByTestId('hud-nodes')).toHaveText('nodes 1');
+    // Still a rail: painted at the edge, the body bare, the card hidden.
+    await expectPainted(page, TODO_RAIL[0], TODO_RAIL[1]);
+    await expectCleared(page, TODO_BODY[0], TODO_BODY[1]);
+    await expectCleared(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+
+    // Expanding after the reload reveals the card IN ITS SLOT — the
+    // membership survived the round trip.
+    await page.mouse.click(TODO_RAIL_CHEVRON[0], TODO_RAIL_CHEVRON[1]);
+    await expect(page.getByTestId('hud-rev')).toHaveText('rev 2');
+    await expectCard(page, TODO_SLOT0[0], TODO_SLOT0[1]);
+  });
   // ── T-040: column selection + F2 rename ─────────────────────────────────
 
   // A To Do header probe (world (-200, -182)): inside the strip, clear of
   // the name (which starts at world x -384), the × zone and every dot.
   const TODO_HEADER_TINT: [number, number] = [440, 178];
 
-  test('20. clicking a header selects the column (tinted) — F2 renames it, one undo restores', async ({
+  test('22. clicking a header selects the column (tinted) — F2 renames it, one undo restores', async ({
     page,
   }) => {
     await page.goto('/');
@@ -647,7 +877,7 @@ test.describe('kanban — columns and card snapping @ 1280×720', () => {
       .toBe(true);
   });
 
-  test('21. F2 targets the card when a card is selected, the column after a header press — never a gone column', async ({
+  test('23. F2 targets the card when a card is selected, the column after a header press — never a gone column', async ({
     page,
   }) => {
     await page.goto('/');

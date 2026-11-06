@@ -15,11 +15,15 @@ import { deepEqual } from './deepEqual';
 import {
   KANBAN_BOARD_COLUMNS,
   KANBAN_CARD_GAP,
+  KANBAN_CHEVRON_SLOT,
+  KANBAN_COLLAPSED_W,
   KANBAN_HEADER_H,
   KANBAN_MIN_COLUMN_W,
   KANBAN_MIN_COLUMN_H,
   KANBAN_PADDING,
   columnAt,
+  columnCollapseHit,
+  columnCollapsePoint,
   columnCloseHit,
   columnClosePoint,
   columnContentHeight,
@@ -27,14 +31,20 @@ import {
   columnEffectiveRectOf,
   columnHeaderHit,
   columnMembers,
+  columnRailRect,
   columnRect,
+  columnReorderPlan,
   columnResizeHit,
   columnResizeRect,
   columnsOf,
   dragMembersOf,
+  edgeHiddenByCollapse,
+  hiddenByCollapse,
   insertionIndex,
+  isCollapsed,
   isColumn,
   planColumnMove,
+  planColumnReorder,
   planColumnResize,
   planKanbanBoard,
   planKanbanCreate,
@@ -81,6 +91,31 @@ function board(
 const SLOT0 = { x: KANBAN_PADDING, y: KANBAN_HEADER_H + KANBAN_PADDING };
 /** Slot 1 top-left for a column at (0, 0) with 120-high cards. */
 const SLOT1 = { x: KANBAN_PADDING, y: SLOT0.y + 120 + KANBAN_CARD_GAP };
+
+/** A board with the SHIPPED seam: columns c1 (x 0), c2 (x 280, 'Doing'),
+ * c3 (x 560, 'Done') — 240 wide, `KANBAN_COLUMN_GAP` apart, exactly what
+ * `planKanbanBoard` plants (the reorder math is specified against it). */
+function tightBoard(
+  cards: Array<{ id: string; col?: 'c1' | 'c2' | 'c3'; y?: number }> = [],
+  widths: Partial<Record<'c1' | 'c2' | 'c3', number>> = {},
+): Doc {
+  const doc = emptyDoc();
+  const w = (id: 'c1' | 'c2' | 'c3') => widths[id] ?? 240;
+  doc.groups = {
+    c1: { ...column('c1'), w: w('c1') },
+    c2: { ...column('c2', 280, 0, 'Doing'), w: w('c2') },
+    c3: { ...column('c3', 560, 0, 'Done'), w: w('c3') },
+  };
+  for (const c of cards) {
+    // Seated at the column's inset (slot 0), like a real board.
+    const inset = c.col === 'c2' ? 296 : c.col === 'c3' ? 576 : 16;
+    const n = node(c.id, { x: inset, y: c.y ?? KANBAN_HEADER_H + KANBAN_PADDING });
+    if (c.col !== undefined) n.groupId = c.col;
+    doc.nodes[c.id] = n;
+    doc.order.push(c.id);
+  }
+  return doc;
+}
 
 describe('kanban — column helpers', () => {
   it('isColumn and columnRect', () => {
@@ -183,7 +218,10 @@ describe('planKanbanDrop — snapping into columns', () => {
       primaryId: 'free',
     });
     // Preview glued to the slot.
-    expect(plan.preview).toEqual({ dx: SLOT0.x - doc.nodes.free!.x, dy: SLOT0.y - doc.nodes.free!.y });
+    expect(plan.preview).toEqual({
+      dx: SLOT0.x - doc.nodes.free!.x,
+      dy: SLOT0.y - doc.nodes.free!.y,
+    });
     const patch = compileCommand(doc, plan.command);
     const next = applyPatch(doc, patch);
     expect(next.nodes.free!.x).toBe(SLOT0.x);
@@ -295,12 +333,20 @@ describe('planKanbanDrop — snapping into columns', () => {
       dy: 40,
       primaryId: 'free',
     });
-    expect(plan.command).toEqual({ type: 'node.move', ids: ['free'], dx: 30, dy: 40 });
+    expect(plan.command).toEqual({
+      type: 'node.move',
+      ids: ['free'],
+      dx: 30,
+      dy: 40,
+    });
     expect(plan.preview).toBeNull();
   });
 
   it('a drag involving a regular group member never snaps (T-024 wins)', () => {
-    const doc = board([{ id: 'a', col: undefined }, { id: 'b', col: undefined }]);
+    const doc = board([
+      { id: 'a', col: undefined },
+      { id: 'b', col: undefined },
+    ]);
     doc.groups = { ...doc.groups, g1: { id: 'g1', name: 'frame' } };
     doc.nodes.a!.groupId = 'g1';
     doc.nodes.b!.groupId = 'g1';
@@ -310,11 +356,19 @@ describe('planKanbanDrop — snapping into columns', () => {
       dy: 0,
       primaryId: 'a',
     });
-    expect(plan.command).toEqual({ type: 'node.move', ids: ['a', 'b'], dx: 100, dy: 0 });
+    expect(plan.command).toEqual({
+      type: 'node.move',
+      ids: ['a', 'b'],
+      dx: 100,
+      dy: 0,
+    });
   });
 
   it('a multi-card drop inserts both cards in y-order; no preview snap', () => {
-    const doc = board([{ id: 'a', col: undefined, y: 300 }, { id: 'b', col: undefined, y: 100 }]);
+    const doc = board([
+      { id: 'a', col: undefined, y: 300 },
+      { id: 'b', col: undefined, y: 100 },
+    ]);
     const plan = planKanbanDrop(doc, {
       ids: ['a', 'b'],
       dx: 16,
@@ -400,10 +454,22 @@ describe('planKanbanBoard — To Do / Doing / Done', () => {
     const next = applyPatch(empty, compileCommand(empty, command));
     expect(Object.keys(next.groups)).toEqual(['x1', 'x2', 'x3']);
     const boardW = 3 * 240 + 2 * 40;
-    expect(next.groups.x1).toMatchObject({ name: 'To Do', x: -boardW / 2, y: -200 });
-    expect(next.groups.x2).toMatchObject({ name: 'Doing', x: -boardW / 2 + 280 });
-    expect(next.groups.x3).toMatchObject({ name: 'Done', x: -boardW / 2 + 560 });
-    expect(columnsOf(next).map((g) => g.name)).toEqual([...KANBAN_BOARD_COLUMNS]);
+    expect(next.groups.x1).toMatchObject({
+      name: 'To Do',
+      x: -boardW / 2,
+      y: -200,
+    });
+    expect(next.groups.x2).toMatchObject({
+      name: 'Doing',
+      x: -boardW / 2 + 280,
+    });
+    expect(next.groups.x3).toMatchObject({
+      name: 'Done',
+      x: -boardW / 2 + 560,
+    });
+    expect(columnsOf(next).map((g) => g.name)).toEqual([
+      ...KANBAN_BOARD_COLUMNS,
+    ]);
     expect(validateDoc(next)).toEqual([]);
   });
 
@@ -429,23 +495,57 @@ describe('kanban — auto-grow (T-037: the effective column rect)', () => {
     );
     // Three 120-high cards: one header, two gaps, both paddings.
     expect(
-      columnContentHeight([node('a', { h: 120 }), node('b', { h: 120 }), node('c', { h: 120 })]),
-    ).toBe(KANBAN_HEADER_H + KANBAN_PADDING + 3 * 120 + 2 * KANBAN_CARD_GAP + KANBAN_PADDING);
+      columnContentHeight([
+        node('a', { h: 120 }),
+        node('b', { h: 120 }),
+        node('c', { h: 120 }),
+      ]),
+    ).toBe(
+      KANBAN_HEADER_H +
+        KANBAN_PADDING +
+        3 * 120 +
+        2 * KANBAN_CARD_GAP +
+        KANBAN_PADDING,
+    );
   });
 
   it('columnEffectiveRectOf: stored height is a floor, growth extends downward', () => {
     const col = column('c1');
     const one = [node('a', { h: 120 })]; // needs 188 < 400
-    const three = [node('a', { h: 120 }), node('b', { h: 120 }), node('c', { h: 120 })]; // 452 > 400
-    expect(columnEffectiveRectOf(col, [])).toEqual({ x: 0, y: 0, w: 240, h: 400 });
-    expect(columnEffectiveRectOf(col, one)).toEqual({ x: 0, y: 0, w: 240, h: 400 });
-    expect(columnEffectiveRectOf(col, three)).toEqual({ x: 0, y: 0, w: 240, h: 452 });
+    const three = [
+      node('a', { h: 120 }),
+      node('b', { h: 120 }),
+      node('c', { h: 120 }),
+    ]; // 452 > 400
+    expect(columnEffectiveRectOf(col, [])).toEqual({
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 400,
+    });
+    expect(columnEffectiveRectOf(col, one)).toEqual({
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 400,
+    });
+    expect(columnEffectiveRectOf(col, three)).toEqual({
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 452,
+    });
     expect(columnEffectiveRectOf({ id: 'g', name: 'f' }, [])).toBeNull();
   });
 
   it('columnEffectiveRect resolves by id against the document', () => {
     const doc = board([{ id: 'a', col: 'c1' }]);
-    expect(columnEffectiveRect(doc, 'c1')).toEqual({ x: 0, y: 0, w: 240, h: 400 });
+    expect(columnEffectiveRect(doc, 'c1')).toEqual({
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 400,
+    });
     expect(columnEffectiveRect(doc, 'nope')).toBeNull();
   });
 
@@ -491,30 +591,51 @@ describe('kanban — column affordance hit-tests (T-037)', () => {
     const bottom = { x: 120, y: 400 }; // bottom-edge midpoint
     const corner = { x: 240, y: 400 };
     expect(columnResizeHit(doc, right, 1)).toEqual({ id: 'c1', edge: 'right' });
-    expect(columnResizeHit(doc, bottom, 1)).toEqual({ id: 'c1', edge: 'bottom' });
+    expect(columnResizeHit(doc, bottom, 1)).toEqual({
+      id: 'c1',
+      edge: 'bottom',
+    });
     // The corner wins when all three radii could match.
-    expect(columnResizeHit(doc, corner, 1)).toEqual({ id: 'c1', edge: 'corner' });
+    expect(columnResizeHit(doc, corner, 1)).toEqual({
+      id: 'c1',
+      edge: 'corner',
+    });
     // 5 world units away at zoom 2 is 10 screen px — outside the 8px radius.
     expect(columnResizeHit(doc, { x: 245, y: 200 }, 2)).toBeNull();
     // 3 world units away at zoom 2 is 6 screen px — inside.
-    expect(columnResizeHit(doc, { x: 243, y: 200 }, 2)).toEqual({ id: 'c1', edge: 'right' });
+    expect(columnResizeHit(doc, { x: 243, y: 200 }, 2)).toEqual({
+      id: 'c1',
+      edge: 'right',
+    });
     expect(columnResizeHit(doc, { x: 0, y: 0 }, 1)).toBeNull();
   });
 
   it('columnResizeRect: top-left anchored, dimensions clamped to the minimum', () => {
     const orig = { x: 0, y: 0, w: 240, h: 400 };
     expect(columnResizeRect(orig, 'right', { x: 320, y: 999 })).toEqual({
-      x: 0, y: 0, w: 320, h: 400,
+      x: 0,
+      y: 0,
+      w: 320,
+      h: 400,
     });
     expect(columnResizeRect(orig, 'bottom', { x: 999, y: 500 })).toEqual({
-      x: 0, y: 0, w: 240, h: 500,
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 500,
     });
     expect(columnResizeRect(orig, 'corner', { x: 320, y: 500 })).toEqual({
-      x: 0, y: 0, w: 320, h: 500,
+      x: 0,
+      y: 0,
+      w: 320,
+      h: 500,
     });
     // Dragging past the anchor clamps at the minimum, never flips.
     expect(columnResizeRect(orig, 'corner', { x: -50, y: -50 })).toEqual({
-      x: 0, y: 0, w: KANBAN_MIN_COLUMN_W, h: KANBAN_MIN_COLUMN_H,
+      x: 0,
+      y: 0,
+      w: KANBAN_MIN_COLUMN_W,
+      h: KANBAN_MIN_COLUMN_H,
     });
   });
 });
@@ -541,14 +662,21 @@ describe('planColumnMove — drag the whole column (T-037)', () => {
     const next = applyPatch(board(), compileCommand(board(), plan));
     expect(next.nodes).toEqual({});
     expect(next.groups.c1).toMatchObject({ x: 100, y: 50 });
-    expect(isEmptyPatch(compileCommand(board(), planColumnMove(board(), 'c1', 0, 0)))).toBe(true);
+    expect(
+      isEmptyPatch(
+        compileCommand(board(), planColumnMove(board(), 'c1', 0, 0)),
+      ),
+    ).toBe(true);
     expect(() => planColumnMove(board(), 'nope', 1, 1)).toThrow();
   });
 });
 
 describe('planColumnResize — resize the column, re-fit the cards (T-037)', () => {
   it('sets the stored geometry and stretches every card to the inner width', () => {
-    const doc = board([{ id: 'a', col: 'c1' }, { id: 'b', col: 'c1', y: SLOT1.y }]);
+    const doc = board([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c1', y: SLOT1.y },
+    ]);
     const plan = planColumnResize(doc, 'c1', { x: 0, y: 0, w: 320, h: 500 });
     const next = applyPatch(doc, compileCommand(doc, plan));
     expect(next.groups.c1).toMatchObject({ x: 0, y: 0, w: 320, h: 500 });
@@ -571,24 +699,142 @@ describe('planColumnResize — resize the column, re-fit the cards (T-037)', () 
   });
 
   it('guards programming errors (unknown column, no inner width)', () => {
-    expect(() => planColumnResize(board(), 'nope', { x: 0, y: 0, w: 240, h: 400 })).toThrow();
-    expect(() => planColumnResize(board(), 'c1', { x: 0, y: 0, w: 20, h: 400 })).toThrow();
+    expect(() =>
+      planColumnResize(board(), 'nope', { x: 0, y: 0, w: 240, h: 400 }),
+    ).toThrow();
+    expect(() =>
+      planColumnResize(board(), 'c1', { x: 0, y: 0, w: 20, h: 400 }),
+    ).toThrow();
+  });
+});
+
+describe('planColumnReorder — Trello-style reflow (T-038)', () => {
+  it('columnReorderPlan: null for unknown ids, non-columns, loners and non-overlapping drags', () => {
+    const lonely = emptyDoc();
+    lonely.groups = { c1: column('c1') };
+    expect(columnReorderPlan(lonely, 'c1', 500, 0)).toBeNull(); // no other column
+    expect(columnReorderPlan(tightBoard(), 'nope', 500, 0)).toBeNull();
+    const framed = tightBoard();
+    framed.groups = { ...framed.groups, g: { id: 'g', name: 'frame' } };
+    expect(columnReorderPlan(framed, 'g', 500, 0)).toBeNull(); // not a column
+    expect(columnReorderPlan(tightBoard(), 'c1', 30, 0)).toBeNull(); // no reach
+    expect(columnReorderPlan(tightBoard(), 'c1', 0, 1000)).toBeNull(); // vertical exit
+  });
+
+  it('columnReorderPlan: dragging c1 past c2\'s centre swaps their slots — c3 keeps its x', () => {
+    // c1 preview [300, 540], centre 420 > c2\'s centre 400 → lands AFTER c2.
+    expect(columnReorderPlan(tightBoard(), 'c1', 300, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('columnReorderPlan: dragging c3 past c2\'s centre lands it in the middle; c2 slides right', () => {
+    // c3 preview [260, 500], centre 380 < c2\'s centre 400 → lands BEFORE c2.
+    expect(columnReorderPlan(tightBoard(), 'c3', -300, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: 280 }],
+    });
+  });
+
+  it('columnReorderPlan: an overlap that crosses no centre seats the column back home', () => {
+    // c1 preview [100, 340] pushes into c2 [280, 520], but the centre
+    // (220) stays left of c2\'s (400): the order — and a compact board —
+    // changes nothing.
+    expect(columnReorderPlan(tightBoard(), 'c1', 100, 0)).toEqual({
+      x: 0,
+      shifts: [],
+    });
+  });
+
+  it('columnReorderPlan: a centre exactly equal lands right of it (the card rule)', () => {
+    // dx 280 puts c1\'s centre exactly on c2\'s (400): `<=` counts c2,
+    // so c1 lands AFTER it.
+    expect(columnReorderPlan(tightBoard(), 'c1', 280, 0)).toEqual({
+      x: 280,
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('columnReorderPlan: variable widths reflow with their own seams', () => {
+    // c2 widened to 320 (x 280–600), c3 pushed to 640: seams stay 40.
+    const doc = tightBoard([], { c2: 320, c3: 240 });
+    doc.groups.c3 = { ...doc.groups.c3!, x: 640 };
+    // c1 centre 120 + 330 = 450 > c2\'s centre 440 → after c2.
+    expect(columnReorderPlan(doc, 'c1', 330, 0)).toEqual({
+      x: 360, // c2 (320 wide) at 0 + 320 + 40
+      shifts: [{ id: 'c2', dx: -280 }],
+    });
+  });
+
+  it('planColumnReorder: ONE batch — the column snaps, its cards follow, the parted column slides with its cards', () => {
+    const doc = tightBoard([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c2' },
+    ]);
+    const plan = planColumnReorder(doc, 'c1', 300, 0);
+    expect(plan).not.toBeNull();
+    const next = applyPatch(doc, compileCommand(doc, plan!));
+    // c1 sealed into c2\'s slot; its card seated at the inset.
+    expect(next.groups.c1).toMatchObject({ x: 280, y: 0, w: 240, h: 400 });
+    expect(next.nodes.a).toMatchObject({ x: 296, y: SLOT0.y });
+    // c2 slid into c1\'s slot; its card seated at the inset.
+    expect(next.groups.c2).toMatchObject({ x: 0, y: 0, w: 240, h: 400 });
+    expect(next.nodes.b).toMatchObject({ x: 16, y: SLOT0.y });
+    // c3 untouched.
+    expect(next.groups.c3).toMatchObject({ x: 560 });
+    expect(validateDoc(next)).toEqual([]);
+    // ONE undo restores the whole reflow.
+    const undone = applyPatch(next, invertPatch(compileCommand(doc, plan!)));
+    expect(deepEqual(undone, doc)).toBe(true);
+  });
+
+  it('planColumnReorder: a seated-home drag with no vertical drift is the empty batch (a pure no-op)', () => {
+    const doc = tightBoard([{ id: 'a', col: 'c1' }]);
+    const plan = planColumnReorder(doc, 'c1', 100, 0);
+    expect(plan).toEqual({ type: 'batch', commands: [] });
+    expect(isEmptyPatch(compileCommand(doc, plan!))).toBe(true);
+  });
+
+  it('planColumnReorder: the row governs x only — a seated-home drag keeps its raw vertical drift', () => {
+    const doc = tightBoard([{ id: 'a', col: 'c1' }]);
+    const plan = planColumnReorder(doc, 'c1', 100, 50);
+    const next = applyPatch(doc, compileCommand(doc, plan!));
+    expect(next.groups.c1).toMatchObject({ x: 0, y: 50 });
+    expect(next.nodes.a).toMatchObject({ x: 16, y: SLOT0.y + 50 });
+    expect(validateDoc(next)).toEqual([]);
+  });
+
+  it('planColumnReorder: null when the drag stays free — the caller falls back to planColumnMove', () => {
+    expect(planColumnReorder(tightBoard(), 'c1', 30, 0)).toBeNull();
+    expect(planColumnReorder(tightBoard(), 'c1', 0, 500)).toBeNull();
   });
 });
 
 describe('planKanbanDrop/planKanbanCreate — T-037 follow-ups', () => {
   it('the plan reports its drop-target column for the highlight', () => {
     const doc = board([{ id: 'a', col: 'c1' }]);
-    const over = planKanbanDrop(doc, { ids: ['a'], dx: 0, dy: 0, primaryId: 'a' });
+    const over = planKanbanDrop(doc, {
+      ids: ['a'],
+      dx: 0,
+      dy: 0,
+      primaryId: 'a',
+    });
     expect(over.target).toBe('c1');
-    const out = planKanbanDrop(doc, { ids: ['a'], dx: 0, dy: 800, primaryId: 'a' });
+    const out = planKanbanDrop(doc, {
+      ids: ['a'],
+      dx: 0,
+      dy: 800,
+      primaryId: 'a',
+    });
     expect(out.target).toBeNull();
     // A regular-group drag reports no target either.
     const grouped = board([{ id: 'a', col: undefined }]);
     grouped.groups = { ...grouped.groups, g1: { id: 'g1', name: 'frame' } };
     grouped.nodes.a!.groupId = 'g1';
     expect(
-      planKanbanDrop(grouped, { ids: ['a'], dx: 10, dy: 0, primaryId: 'a' }).target,
+      planKanbanDrop(grouped, { ids: ['a'], dx: 10, dy: 0, primaryId: 'a' })
+        .target,
     ).toBeNull();
   });
 
@@ -598,5 +844,162 @@ describe('planKanbanDrop/planKanbanCreate — T-037 follow-ups', () => {
     const next = applyPatch(doc, compileCommand(doc, command!));
     expect(next.nodes.new!.w).toBe(240 - 2 * KANBAN_PADDING);
     expect(validateDoc(next)).toEqual([]);
+  });
+});
+
+describe('collapse — the rail geometry and hidden cards (T-039, M9)', () => {
+  /** The same board, with c1 collapsed. */
+  function collapsedBoard(
+    cards: Array<{ id: string; col?: 'c1' | 'c2'; y?: number }> = [],
+  ): Doc {
+    const doc = board(cards);
+    doc.groups.c1!.collapsed = true;
+    return doc;
+  }
+
+  it('isCollapsed is column-only — a plain frame never is', () => {
+    expect(isCollapsed({ ...column('c1'), collapsed: true })).toBe(true);
+    expect(isCollapsed(column('c1'))).toBe(false);
+    expect(isCollapsed({ ...column('c1'), collapsed: false })).toBe(false);
+    expect(isCollapsed({ id: 'g', name: 'frame', collapsed: true })).toBe(
+      false,
+    );
+  });
+
+  it('columnRailRect keeps the top-left corner and height, swaps the width', () => {
+    expect(columnRailRect({ ...column('c1'), collapsed: true })).toEqual({
+      x: 0,
+      y: 0,
+      w: KANBAN_COLLAPSED_W,
+      h: 400,
+    });
+    expect(columnRailRect(column('c1'))).toEqual({
+      x: 0,
+      y: 0,
+      w: KANBAN_COLLAPSED_W,
+      h: 400,
+    }); // the rail is a pure geometry helper
+    expect(columnRailRect({ id: 'g', name: 'frame' })).toBeNull();
+  });
+
+  it('the collapsed effective rect is the rail — no auto-grow', () => {
+    const doc = collapsedBoard([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c1', y: SLOT1.y },
+      { id: 'c', col: 'c1', y: SLOT1.y + 132 },
+    ]);
+    const members = columnMembers(doc, 'c1');
+    // Sanity: an empty column never grows past its stored height.
+    expect(columnEffectiveRectOf(column('c1'), [])).toEqual({
+      x: 0,
+      y: 0,
+      w: 240,
+      h: 400,
+    });
+    // Expanded: three stacked cards grow the column past its stored height.
+    doc.groups.c1!.collapsed = false;
+    expect(columnEffectiveRectOf(doc.groups.c1!, members)!.h).toBeGreaterThan(
+      400,
+    );
+    // Collapsed: the rail — hidden cards never grow it.
+    doc.groups.c1!.collapsed = true;
+    expect(columnEffectiveRectOf(doc.groups.c1!, members)).toEqual({
+      x: 0,
+      y: 0,
+      w: KANBAN_COLLAPSED_W,
+      h: 400,
+    });
+  });
+
+  it('columnAt skips collapsed columns — the rail is not a drop target', () => {
+    const doc = collapsedBoard([{ id: 'a', col: 'c1' }]);
+    expect(columnAt(doc, { x: 10, y: 10 })).toBeNull(); // the rail, skipped
+    expect(columnAt(doc, { x: 310, y: 10 })).toBe('c2'); // c2 expanded
+    doc.groups.c1!.collapsed = false;
+    expect(columnAt(doc, { x: 10, y: 10 })).toBe('c1');
+  });
+
+  it('the whole rail is the collapsed column’s header; expansion restores the strip', () => {
+    const doc = collapsedBoard();
+    // Below the header strip: a hit while collapsed, empty while expanded.
+    expect(columnHeaderHit(doc, { x: 10, y: 300 })).toBe('c1');
+    doc.groups.c1!.collapsed = false;
+    expect(columnHeaderHit(doc, { x: 10, y: 300 })).toBeNull();
+    expect(columnHeaderHit(doc, { x: 10, y: 18 })).toBe('c1'); // the strip
+  });
+
+  it('no × and no resize affordances while collapsed', () => {
+    const doc = collapsedBoard();
+    const cp = columnClosePoint(columnRect(doc.groups.c1!)!);
+    expect(columnCloseHit(doc, cp, 1)).toBeNull();
+    expect(columnResizeHit(doc, { x: 240, y: 200 }, 1)).toBeNull(); // the stored right edge
+    expect(columnResizeHit(doc, { x: 240, y: 400 }, 1)).toBeNull(); // the stored corner
+    doc.groups.c1!.collapsed = false;
+    expect(columnCloseHit(doc, cp, 1)).toBe('c1');
+    expect(columnResizeHit(doc, { x: 240, y: 200 }, 1)).toEqual({
+      id: 'c1',
+      edge: 'right',
+    });
+  });
+
+  it('columnCollapsePoint sits in the header slot expanded, the rail centre collapsed', () => {
+    const rect = columnRect(column('c1'))!;
+    expect(columnCollapsePoint(rect, false)).toEqual({
+      x: KANBAN_PADDING + KANBAN_CHEVRON_SLOT / 2,
+      y: KANBAN_HEADER_H / 2,
+    });
+    expect(columnCollapsePoint({ x: 10, y: 20, w: 36, h: 400 }, true)).toEqual({
+      x: 10 + KANBAN_COLLAPSED_W / 2,
+      y: 20 + KANBAN_HEADER_H / 2,
+    });
+  });
+
+  it('columnCollapseHit works in screen space at any zoom', () => {
+    const doc = board();
+    const expandedCp = columnCollapsePoint(columnRect(column('c1'))!, false);
+    expect(columnCollapseHit(doc, expandedCp, 1)).toBe('c1');
+    // The threshold is in SCREEN pixels: 5 world units at zoom 2 is 10 px
+    // (the boundary, inclusive); 9 world units is 18 px — far out.
+    expect(
+      columnCollapseHit(doc, { x: expandedCp.x - 5, y: expandedCp.y }, 2),
+    ).toBe('c1');
+    expect(
+      columnCollapseHit(doc, { x: expandedCp.x - 9, y: expandedCp.y }, 2),
+    ).toBeNull();
+    expect(columnCollapseHit(doc, { x: 300, y: 300 }, 1)).toBeNull();
+    // Collapsed: the same hit-test finds the rail chevron.
+    doc.groups.c1!.collapsed = true;
+    const railCp = columnCollapsePoint(columnRailRect(doc.groups.c1!)!, true);
+    expect(columnCollapseHit(doc, railCp, 1)).toBe('c1');
+  });
+
+  it('hiddenByCollapse / edgeHiddenByCollapse derive hiding from the data', () => {
+    const doc = collapsedBoard([
+      { id: 'a', col: 'c1' },
+      { id: 'b', col: 'c2' },
+    ]);
+    doc.nodes.free = node('free', { x: 1000, y: 1000 });
+    doc.order.push('free');
+    expect(hiddenByCollapse(doc, doc.nodes.a!)).toBe(true);
+    expect(hiddenByCollapse(doc, doc.nodes.b!)).toBe(false);
+    expect(hiddenByCollapse(doc, doc.nodes.free!)).toBe(false);
+    doc.groups.c1!.collapsed = false;
+    expect(hiddenByCollapse(doc, doc.nodes.a!)).toBe(false);
+
+    doc.groups.c1!.collapsed = true;
+    doc.edges = {
+      e1: {
+        id: 'e1',
+        from: { node: 'a', anchor: 'auto' },
+        to: { node: 'b', anchor: 'auto' },
+      },
+      e2: {
+        id: 'e2',
+        from: { node: 'b', anchor: 'auto' },
+        to: { node: 'free', anchor: 'auto' },
+      },
+    };
+    expect(edgeHiddenByCollapse(doc, doc.edges.e1!)).toBe(true);
+    expect(edgeHiddenByCollapse(doc, doc.edges.e2!)).toBe(false);
   });
 });

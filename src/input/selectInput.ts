@@ -28,11 +28,20 @@
  * release), and the kanban planner's target column is mirrored into the UI
  * store as the drop-target highlight while a card drag is in flight.
  *
+ * T-039 (collapse): a press on the header chevron arms a collapse/expand
+ * toggle — ONE `group.update` committed on release, the × precedent — and
+ * a press on a COLLAPSED column's rail arms a move like a header press
+ * (the whole rail is the header; its hidden members are never selected).
+ * The marquee skips hidden cards, exactly like the renderer and the
+ * hit-tests do — the painted board is the selectable board.
+ *
  * T-040 (column selection): a header press ALSO selects the column itself
  * (`columnSelection`), alongside its members — the selected column is the
  * F2 rename target, and its header paints the selection tint. Every
  * machine-driven selection (a node, an edge, a marquee) clears it — the
- * mutual-exclusion rule the node and edge selections follow.
+ * mutual-exclusion rule the node and edge selections follow. A collapsed
+ * rail press selects its column too, so F2 renames a collapsed column
+ * through the same overlay (T-039 shifted right of the chevron slot).
  *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
@@ -54,14 +63,20 @@ import {
 } from '../core/hitTest';
 import {
   columnCloseHit,
+  columnCollapseHit,
   columnEffectiveRect,
   columnHeaderHit,
+  columnReorderPlan,
   columnResizeHit,
   columnResizeRect,
   dragMembersOf,
+  hiddenByCollapse,
+  isCollapsed,
   planColumnMove,
+  planColumnReorder,
   planColumnResize,
   planKanbanDrop,
+  type ColumnReorderPlan,
   type ColumnResizeEdge,
 } from '../core/kanban';
 import { rectsIntersect } from '../core/geometry';
@@ -69,7 +84,7 @@ import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
-import type { UiStore } from '../view/uiStore';
+import type { ColumnReorderPreview, UiStore } from '../view/uiStore';
 import { isEditableTarget } from './keys';
 import { pointerToCanvasPos } from './cursor';
 import { DRAG_THRESHOLD } from './selectTool';
@@ -96,6 +111,21 @@ export interface SelectInput {
 }
 
 /**
+ * The core reorder plan as the UI-store preview (T-038): the parted
+ * columns' shifts keyed by id. Pure; null passes through (no reorder in
+ * flight — a free drag keeps the T-037 preview untouched).
+ */
+function toReorderPreview(
+  columnId: Id,
+  plan: ColumnReorderPlan | null,
+): ColumnReorderPreview | null {
+  if (plan === null) return null;
+  const shifts: Record<Id, number> = {};
+  for (const shift of plan.shifts) shifts[shift.id] = shift.dx;
+  return { id: columnId, shifts };
+}
+
+/**
  * Attach select/move/delete/box-select input. Returns a `detach()` that removes
  * every listener and releases pointer capture.
  */
@@ -108,6 +138,16 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
    * paths (cancel, blur, a drag past the threshold) dispatch nothing,
    * exactly like every other gesture (D-26). */
   let pendingClose: {
+    pointerId: number;
+    columnId: Id;
+    screen: { x: number; y: number };
+  } | null = null;
+  /**
+   * An armed collapse-chevron press (T-039): the column collapses/expands
+   * on RELEASE — one `group.update`, one undo step. The same cancel paths
+   * as the × press disarm it silently (D-26).
+   */
+  let pendingCollapse: {
     pointerId: number;
     columnId: Id;
     screen: { x: number; y: number };
@@ -170,6 +210,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     releaseColumnPointer();
     uiStore.setColumnDrag(null);
     uiStore.setColumnResize(null);
+    uiStore.setColumnReorder(null);
   }
 
   /** What a drag looked like BEFORE the reduce: at pointer-up the machine
@@ -286,6 +327,9 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     for (const id of doc.order) {
       const node = doc.nodes[id];
       if (node === undefined) continue; // defensive: order is a permutation
+      // T-039: a hidden card is not painted and not clickable — the marquee
+      // never grabs one either (the painted board is the selectable board).
+      if (hiddenByCollapse(doc, node)) continue;
       if (
         rectsIntersect(
           { x: node.x, y: node.y, w: node.w, h: node.h },
@@ -385,6 +429,22 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       });
       return;
     }
+    // T-039: a press on a column's collapse chevron (screen-space target,
+    // sitting inside the header strip — checked BEFORE the header itself)
+    // arms a collapse/expand toggle. Committed on release, like the × (D-26).
+    const collapseHit = columnCollapseHit(
+      docStore.get(),
+      world,
+      cameraStore.get().zoom,
+    );
+    if (collapseHit !== null) {
+      pendingCollapse = {
+        pointerId: e.pointerId,
+        columnId: collapseHit,
+        screen,
+      };
+      return;
+    }
     // T-035: a press on a column's × close affordance arms a column delete
     // (group.delete — the cards survive, ungrouped). Committed on release,
     // like every gesture (D-26); cancel paths disarm silently.
@@ -448,19 +508,29 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     // members are selected up front, as a press anywhere inside the column
     // does. An empty column has no members to drag along — fall through to
     // the ordinary empty-space flow (marquee), unchanged.
+    // T-039: a COLLAPSED column's whole rail is its header — the press arms
+    // a move even with no members (the rail is the column's only
+    // affordance), and the hidden members are NEVER selected (an invisible
+    // selection would delete on a stray Delete press).
     if (hitId === null && hitEdgeId === null && e.button === 0 && !e.shiftKey) {
       const headerId = columnHeaderHit(docStore.get(), world);
       if (headerId !== null) {
         const doc = docStore.get();
+        const collapsed = isCollapsed(doc.groups[headerId]!);
         const members: Id[] = [];
-        for (const id of doc.order) {
-          if (doc.nodes[id]?.groupId === headerId) members.push(id);
+        if (!collapsed) {
+          for (const id of doc.order) {
+            if (doc.nodes[id]?.groupId === headerId) members.push(id);
+          }
         }
-        if (members.length > 0) {
-          uiStore.setSelection(members);
-          // T-040: the header press selects the COLUMN too — the F2 rename
-          // target. It survives the plain click and the drag alike (the
-          // gesture never emits machine selections).
+        if (collapsed || members.length > 0) {
+          // T-039: a collapsed column selects nothing — its members are
+          // hidden — but the rail still drag-arms like a header press.
+          if (!collapsed) uiStore.setSelection(members);
+          // T-040: the press selects the COLUMN too — the F2 rename target.
+          // It survives the plain click and the drag alike (the gesture
+          // never emits machine selections), and a collapsed rail press
+          // selects its column the same way.
           uiStore.setColumnSelection(headerId);
           columnGesture = {
             pointerId: e.pointerId,
@@ -526,11 +596,22 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
         columnGesture.active = true;
       }
       if (columnGesture.kind === 'move') {
+        const dx = world.x - columnGesture.startWorld.x;
+        const dy = world.y - columnGesture.startWorld.y;
         uiStore.setColumnDrag({
           id: columnGesture.columnId,
-          dx: world.x - columnGesture.startWorld.x,
-          dy: world.y - columnGesture.startWorld.y,
+          dx,
+          dy,
         });
+        // T-038: while the preview pushes into another column, the board
+        // PARTS live — the parted columns' shifts ride along the drag
+        // preview (the dragged column itself keeps the raw delta).
+        uiStore.setColumnReorder(
+          toReorderPreview(
+            columnGesture.columnId,
+            columnReorderPlan(docStore.get(), columnGesture.columnId, dx, dy),
+          ),
+        );
       } else {
         const rect = columnResizeRect(
           columnGesture.rect,
@@ -554,6 +635,30 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerUp(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    // T-039: release of an armed chevron press — toggle the collapse when
+    // the pointer stayed put (a click, D-26): ONE group.update, so the
+    // toggle is one undo step. A drag past the threshold disarms silently,
+    // like the × press.
+    if (pendingCollapse !== null && e.pointerId === pendingCollapse.pointerId) {
+      const { screen } = positions(e);
+      if (
+        Math.hypot(
+          screen.x - pendingCollapse.screen.x,
+          screen.y - pendingCollapse.screen.y,
+        ) < DRAG_THRESHOLD
+      ) {
+        const group = docStore.get().groups[pendingCollapse.columnId];
+        if (group !== undefined) {
+          docStore.dispatch({
+            type: 'group.update',
+            ids: [pendingCollapse.columnId],
+            patch: { collapsed: group.collapsed !== true },
+          });
+        }
+      }
+      pendingCollapse = null;
+      return;
+    }
     // T-035: release of an armed × close press — delete the column when the
     // pointer stayed put (a click, D-26); any drag past the threshold
     // disarms silently. Another pointer's release flows on to the machine.
@@ -583,13 +688,14 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       const { world } = positions(e);
       if (gesture.active) {
         if (gesture.kind === 'move') {
+          const dx = world.x - gesture.startWorld.x;
+          const dy = world.y - gesture.startWorld.y;
+          // T-038: a drag that pushed into another column SEATS in the gap
+          // — the snapped batch (empty when it seats home: the store's
+          // no-op). Anything else stays the T-037 free move.
           docStore.dispatch(
-            planColumnMove(
-              docStore.get(),
-              gesture.columnId,
-              world.x - gesture.startWorld.x,
-              world.y - gesture.startWorld.y,
-            ),
+            planColumnReorder(docStore.get(), gesture.columnId, dx, dy) ??
+              planColumnMove(docStore.get(), gesture.columnId, dx, dy),
           );
         } else {
           const rect = columnResizeRect(gesture.rect, gesture.edge, world);
@@ -608,6 +714,10 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onPointerCancel(e: PointerEvent): void {
     if (e.pointerType === 'touch') return;
+    if (pendingCollapse !== null && e.pointerId === pendingCollapse.pointerId) {
+      pendingCollapse = null;
+      return;
+    }
     if (pendingClose !== null && e.pointerId === pendingClose.pointerId) {
       pendingClose = null;
       return;
@@ -663,6 +773,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
 
   function onBlur(): void {
     pendingClose = null;
+    pendingCollapse = null; // T-039: blur disarms the toggle, no command
     endColumnGesture(); // T-037: blur cancels the column gesture, no command
     feed({ type: 'blur' });
   }
@@ -692,6 +803,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       }
       state = initialSelectState();
       pendingClose = null;
+      pendingCollapse = null; // T-039
       endColumnGesture(); // T-037
     },
   };
