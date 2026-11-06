@@ -288,6 +288,20 @@ window.addEventListener('keydown', (e) => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const shift = e.shiftKey;
 
+  // T-040: F2 renames the SELECTED COLUMN (Explorer semantics: F2 is
+  // "rename"). Checked before the node branch — a header press selects the
+  // members AND the column, and the tinted header is the rename target the
+  // user sees; to F2 a card, click the card itself (the machine's node
+  // selection clears the column selection). Enter keeps its T-020
+  // node-editor meaning (and the mind-map cadence owns it there).
+  if (e.key === 'F2' && !mod) {
+    const columnId = uiStore.get().columnSelection;
+    if (columnId !== null && !textEditor.isOpen()) {
+      e.preventDefault();
+      textEditor.editColumn(columnId);
+      return;
+    }
+  }
   // Enter / F2 with exactly one node selected opens the text editor (T-020).
   // In mind-map mode plain Enter grows a sibling instead (T-029) — the
   // mind-map handler owns Enter; F2 and double-click still open the editor.
