@@ -50,12 +50,15 @@ import {
   columnCloseHit,
   columnEffectiveRect,
   columnHeaderHit,
+  columnReorderPlan,
   columnResizeHit,
   columnResizeRect,
   dragMembersOf,
   planColumnMove,
+  planColumnReorder,
   planColumnResize,
   planKanbanDrop,
+  type ColumnReorderPlan,
   type ColumnResizeEdge,
 } from '../core/kanban';
 import { rectsIntersect } from '../core/geometry';
@@ -63,7 +66,7 @@ import type { Id } from '../core/types';
 import type { DocStore } from '../core/store';
 import { screenToWorld } from '../view/camera';
 import type { CameraStore } from '../view/cameraStore';
-import type { UiStore } from '../view/uiStore';
+import type { ColumnReorderPreview, UiStore } from '../view/uiStore';
 import { isEditableTarget } from './keys';
 import { pointerToCanvasPos } from './cursor';
 import { DRAG_THRESHOLD } from './selectTool';
@@ -87,6 +90,21 @@ export interface SelectInputOptions {
 
 export interface SelectInput {
   detach(): void;
+}
+
+/**
+ * The core reorder plan as the UI-store preview (T-038): the parted
+ * columns' shifts keyed by id. Pure; null passes through (no reorder in
+ * flight — a free drag keeps the T-037 preview untouched).
+ */
+function toReorderPreview(
+  columnId: Id,
+  plan: ColumnReorderPlan | null,
+): ColumnReorderPreview | null {
+  if (plan === null) return null;
+  const shifts: Record<Id, number> = {};
+  for (const shift of plan.shifts) shifts[shift.id] = shift.dx;
+  return { id: columnId, shifts };
 }
 
 /**
@@ -164,6 +182,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
     releaseColumnPointer();
     uiStore.setColumnDrag(null);
     uiStore.setColumnResize(null);
+    uiStore.setColumnReorder(null);
   }
 
   /** What a drag looked like BEFORE the reduce: at pointer-up the machine
@@ -511,11 +530,22 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
         columnGesture.active = true;
       }
       if (columnGesture.kind === 'move') {
+        const dx = world.x - columnGesture.startWorld.x;
+        const dy = world.y - columnGesture.startWorld.y;
         uiStore.setColumnDrag({
           id: columnGesture.columnId,
-          dx: world.x - columnGesture.startWorld.x,
-          dy: world.y - columnGesture.startWorld.y,
+          dx,
+          dy,
         });
+        // T-038: while the preview pushes into another column, the board
+        // PARTS live — the parted columns' shifts ride along the drag
+        // preview (the dragged column itself keeps the raw delta).
+        uiStore.setColumnReorder(
+          toReorderPreview(
+            columnGesture.columnId,
+            columnReorderPlan(docStore.get(), columnGesture.columnId, dx, dy),
+          ),
+        );
       } else {
         const rect = columnResizeRect(
           columnGesture.rect,
@@ -568,13 +598,14 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       const { world } = positions(e);
       if (gesture.active) {
         if (gesture.kind === 'move') {
+          const dx = world.x - gesture.startWorld.x;
+          const dy = world.y - gesture.startWorld.y;
+          // T-038: a drag that pushed into another column SEATS in the gap
+          // — the snapped batch (empty when it seats home: the store's
+          // no-op). Anything else stays the T-037 free move.
           docStore.dispatch(
-            planColumnMove(
-              docStore.get(),
-              gesture.columnId,
-              world.x - gesture.startWorld.x,
-              world.y - gesture.startWorld.y,
-            ),
+            planColumnReorder(docStore.get(), gesture.columnId, dx, dy) ??
+              planColumnMove(docStore.get(), gesture.columnId, dx, dy),
           );
         } else {
           const rect = columnResizeRect(gesture.rect, gesture.edge, world);
