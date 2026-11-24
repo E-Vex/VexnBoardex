@@ -159,3 +159,11 @@ export const KANBAN_HIGHLIGHT_FILL = 'rgba(245, 166, 35, 0.14)';
 
 /** The drop-target highlight border (T-037): the accent selection colour. */
 export const KANBAN_HIGHLIGHT_BORDER = 'rgba(245, 166, 35, 0.8)';
+
+/**
+ * The selected column's header wash (T-040): a soft accent tint over the
+ * header strip only — deliberately subtler than the drop-target highlight
+ * (selection is a state, not an urgent target), but clearly different from
+ * the plain panel fill so the F2 target is visible.
+ */
+export const KANBAN_SELECTED_HEADER_FILL = 'rgba(245, 166, 35, 0.18)';

@@ -35,6 +35,14 @@
  * The marquee skips hidden cards, exactly like the renderer and the
  * hit-tests do — the painted board is the selectable board.
  *
+ * T-040 (column selection): a header press ALSO selects the column itself
+ * (`columnSelection`), alongside its members — the selected column is the
+ * F2 rename target, and its header paints the selection tint. Every
+ * machine-driven selection (a node, an edge, a marquee) clears it — the
+ * mutual-exclusion rule the node and edge selections follow. A collapsed
+ * rail press selects its column too, so F2 renames a collapsed column
+ * through the same overlay (T-039 shifted right of the chevron slot).
+ *
  * Coordinate conversion goes through `view/camera` (I-02) and the shared
  * position helper; hit-testing through `core/hitTest`. Nothing starts while
  * a pan owns the pointer (`isPanActive`: Space held or actively panning —
@@ -225,9 +233,13 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       switch (effect.type) {
         case 'select':
           uiStore.setSelection(effect.ids);
+          // T-040: a machine selection always replaces the column selection
+          // (the mutual-exclusion rule; only a header press sets it).
+          uiStore.setColumnSelection(null);
           break;
         case 'selectEdge':
           uiStore.setEdgeSelection(effect.ids);
+          uiStore.setColumnSelection(null); // T-040: same rule
           break;
         case 'setDrag': {
           let d = effect.drag;
@@ -278,6 +290,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           break;
         case 'selectInRect':
           uiStore.setSelection(nodesIntersectingScreenRect(effect.rect));
+          uiStore.setColumnSelection(null); // T-040: same rule
           break;
         case 'setResize':
           uiStore.setResize(effect.rect);
@@ -511,7 +524,14 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
           }
         }
         if (collapsed || members.length > 0) {
+          // T-039: a collapsed column selects nothing — its members are
+          // hidden — but the rail still drag-arms like a header press.
           if (!collapsed) uiStore.setSelection(members);
+          // T-040: the press selects the COLUMN too — the F2 rename target.
+          // It survives the plain click and the drag alike (the gesture
+          // never emits machine selections), and a collapsed rail press
+          // selects its column the same way.
+          uiStore.setColumnSelection(headerId);
           columnGesture = {
             pointerId: e.pointerId,
             columnId: headerId,
@@ -736,6 +756,7 @@ export function attachSelectInput(opts: SelectInputOptions): SelectInput {
       const allIds = Object.keys(doc.nodes);
       if (allIds.length > 0) {
         uiStore.setSelection(allIds);
+        uiStore.setColumnSelection(null); // T-040: a node selection replaces it
       }
       return;
     }

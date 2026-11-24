@@ -331,6 +331,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -383,6 +384,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -413,6 +415,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -447,6 +450,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: null,
         connect: null,
         editing: null,
@@ -479,6 +483,7 @@ describe('renderBoard — selection outline (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -513,6 +518,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -549,6 +555,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -576,6 +583,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: { ids: ['a'], dx: 50, dy: 25 },
       connect: null,
       editing: null,
@@ -606,6 +614,7 @@ describe('renderBoard — drag preview (T-008 R9)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: { ids: ['a'], dx: 9000, dy: 9000 },
       connect: null,
       editing: null,
@@ -691,6 +700,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: null,
         connect: null,
         editing: null,
@@ -730,6 +740,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: { ids: ['a'], dx: 50, dy: 25 },
         connect: null,
         editing: null,
@@ -765,6 +776,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: null,
         connect: null,
         editing: null,
@@ -803,6 +815,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: null,
         connect: null,
         editing: null,
@@ -837,6 +850,7 @@ describe('renderBoard — edge rendering (T-010)', () => {
         columnReorder: null,
         kanbanDropTarget: null,
         editingColumn: null,
+        columnSelection: null,
         drag: null,
         connect: null,
         editing: null,
@@ -883,6 +897,7 @@ describe('renderBoard — group frames (T-024)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -929,6 +944,7 @@ describe('renderBoard — group frames (T-024)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -972,6 +988,7 @@ describe('renderBoard — orthogonal edge rendering (T-033)', () => {
     columnReorder: null,
     kanbanDropTarget: null,
     editingColumn: null,
+    columnSelection: null,
     drag: null,
     connect: null,
     editing: null,
@@ -1212,6 +1229,7 @@ describe('renderBoard — kanban columns, T-037 follow-ups', () => {
       columnReorder: null,
       kanbanDropTarget: 'c1',
       editingColumn: null,
+      columnSelection: null,
     });
     expect(
       ctx.calls.some(
@@ -1245,6 +1263,7 @@ describe('renderBoard — kanban columns, T-037 follow-ups', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
     // Panel: the right edge x moves to 240 + 100 and the top to 50.
     expect(hasArcWith(ctx, 0, 340)).toBe(true);
@@ -1272,6 +1291,7 @@ describe('renderBoard — kanban columns, T-037 follow-ups', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
     // Panel right edge: 320, bottom: 500 (content 188 < 500, stored stands).
     expect(hasArcWith(ctx, 0, 320)).toBe(true);
@@ -1316,6 +1336,7 @@ describe('renderBoard — kanban columns, T-037 follow-ups', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: 'c1',
+      columnSelection: null,
     });
     expect(
       ctx.calls.some((c) => c.name === 'fillText' && c.args[0] === 'To Do'),
@@ -1396,6 +1417,7 @@ describe('renderBoard — kanban columns, T-038 follow-ups', () => {
       columnReorder: { id: 'c1', shifts: { c2: -280 } },
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
     // The parted panel slid into the vacated slot: right edge 280 − 280 + 240.
     expect(hasArcWith(ctx, 0, 240)).toBe(true);
@@ -1426,6 +1448,7 @@ describe('renderBoard — kanban columns, T-038 follow-ups', () => {
       columnReorder: { id: 'c1', shifts: { c2: -280 } },
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
     // c1 stays home (right edge 240), c2 is parted to 240 — both panels
     // paint, nothing is dragged, only c2 moved.

@@ -94,6 +94,7 @@ import {
   KANBAN_CLOSE_COLOR,
   KANBAN_HIGHLIGHT_FILL,
   KANBAN_HIGHLIGHT_BORDER,
+  KANBAN_SELECTED_HEADER_FILL,
 } from './theme';
 
 // ── Visual constants (all in one place, per R3) ──────────────────────────
@@ -543,6 +544,13 @@ export interface KanbanColumnStyle {
   /** Paint the column name — skipped while the DOM overlay edits it. */
   drawName: boolean;
   /**
+   * Paint the SELECTION wash over the header strip (T-040): the selected
+   * column is the F2 rename target, and the tint makes that target
+   * visible — the drop-target highlight washes the whole panel, this only
+   * the header, in a subtler accent.
+   */
+  selected: boolean;
+  /**
    * Paint the COLLAPSED rail instead of the panel (T-039): the chevron
    * flips to ›, the name rotates along the rail, and the × is left out —
    * a collapsed column is expanded (or dragged by its rail) before it is
@@ -566,6 +574,7 @@ export interface KanbanColumnStyle {
  * reserved left slot (the name shifts right of it), and
  * `style.collapsed` paints the RAIL — chevron flipped, name rotated along
  * the rail, no ×.
+ * T-040: `style.selected` washes the header strip with the selection tint.
  */
 function drawKanbanColumn(
   ctx: CanvasRenderingContext2D,
@@ -584,6 +593,18 @@ function drawKanbanColumn(
     ? KANBAN_HIGHLIGHT_BORDER
     : KANBAN_COLUMN_BORDER;
   ctx.stroke();
+
+  // T-040: the selected column's header strip — the F2 target — gets a
+  // soft accent wash, clipped to the panel so the rounded corners stay
+  // rounded (a plain rect fill would square them off).
+  if (style.selected) {
+    ctx.save();
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 10);
+    ctx.clip();
+    ctx.fillStyle = KANBAN_SELECTED_HEADER_FILL;
+    ctx.fillRect(rect.x, rect.y, rect.w, KANBAN_HEADER_H);
+    ctx.restore();
+  }
 
   // The header divider.
   const headerY = rect.y + KANBAN_HEADER_H;
@@ -792,6 +813,7 @@ export function renderBoard(
     columnReorder: null,
     kanbanDropTarget: null,
     editingColumn: null,
+    columnSelection: null,
   },
 ): void {
   const { width, height } = viewport;
@@ -904,6 +926,7 @@ export function renderBoard(
         drawKanbanColumn(ctx, rect, group.name, m.scale, {
           highlight: ui.kanbanDropTarget === groupId,
           drawName: ui.editingColumn !== groupId,
+          selected: ui.columnSelection === groupId,
           collapsed,
         });
         // The resize affordances belong to the panel — the rail is moved

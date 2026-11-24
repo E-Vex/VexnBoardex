@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Doc, Node } from '../core/types';
-import { createUiStore, pruneEdgeSelection, pruneSelection } from './uiStore';
+import {
+  createUiStore,
+  pruneColumnSelection,
+  pruneEdgeSelection,
+  pruneSelection,
+} from './uiStore';
 
 function node(id: string): Node {
   return {
@@ -44,6 +49,7 @@ describe('createUiStore — initial state (R3)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
   });
 });
@@ -64,6 +70,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: null,
       connect: null,
       editing: null,
@@ -114,6 +121,7 @@ describe('setSelection — notify only on real change (R3)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
       drag: { ids: ['a'], dx: 10, dy: 20 },
       connect: null,
       editing: null,
@@ -194,6 +202,7 @@ describe('setDrag — notify only on real change (R3)', () => {
       columnReorder: null,
       kanbanDropTarget: null,
       editingColumn: null,
+      columnSelection: null,
     });
     expect(fn).toHaveBeenCalledTimes(1);
   });
@@ -465,7 +474,10 @@ describe('column reorder preview (T-038)', () => {
     const fn = vi.fn();
     store.subscribe(fn);
     store.setColumnReorder({ id: 'c1', shifts: { c2: -280 } });
-    expect(store.get().columnReorder).toEqual({ id: 'c1', shifts: { c2: -280 } });
+    expect(store.get().columnReorder).toEqual({
+      id: 'c1',
+      shifts: { c2: -280 },
+    });
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
@@ -492,5 +504,56 @@ describe('column reorder preview (T-038)', () => {
     store.setColumnReorder(null);
     expect(store.get().columnReorder).toBeNull();
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('setColumnSelection — the selected column, the F2 target (T-040)', () => {
+  it('stores the id, notifies once per change and never for a repeat', () => {
+    const store = createUiStore();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setColumnSelection('c1');
+    expect(store.get().columnSelection).toBe('c1');
+    expect(fn).toHaveBeenCalledTimes(1);
+    store.setColumnSelection('c1');
+    expect(fn).toHaveBeenCalledTimes(1); // not a change
+    store.setColumnSelection('c2');
+    expect(store.get().columnSelection).toBe('c2');
+    expect(fn).toHaveBeenCalledTimes(2);
+    store.setColumnSelection(null);
+    expect(store.get().columnSelection).toBeNull();
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('coexists with the node selection (a header press sets both)', () => {
+    const store = createUiStore();
+    store.setSelection(['a', 'b']); // the members (T-024)
+    store.setColumnSelection('c1');
+    expect(store.get().selection).toEqual(['a', 'b']);
+    expect(store.get().columnSelection).toBe('c1');
+  });
+});
+
+describe('pruneColumnSelection — drop a deleted column (T-040)', () => {
+  it('keeps the id while the group exists (and returns it as-is)', () => {
+    const doc = docOf('a');
+    doc.groups = {
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 400,
+      },
+    };
+    expect(pruneColumnSelection('c1', doc)).toBe('c1');
+    expect(pruneColumnSelection(null, doc)).toBeNull();
+  });
+
+  it('nulls the id once the group is gone (the × delete)', () => {
+    const doc = docOf('a');
+    expect(pruneColumnSelection('c1', doc)).toBeNull();
   });
 });
