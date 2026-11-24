@@ -6,7 +6,12 @@ import { describe, expect, it } from 'vitest';
 
 import { emptyDoc, validateDoc } from './doc';
 import type { Doc, Edge } from './types';
-import { serializeDoc, deserializeDoc, coerceDoc, FILE_VERSION } from './serialize';
+import {
+  serializeDoc,
+  deserializeDoc,
+  coerceDoc,
+  FILE_VERSION,
+} from './serialize';
 
 function makeDoc(): Doc {
   const doc = emptyDoc();
@@ -112,7 +117,10 @@ describe('deserializeDoc', () => {
     const { envelope, warnings } = deserializeDoc(JSON.stringify(parsed));
 
     expect(warnings).toHaveLength(0);
-    expect((envelope.doc.nodes.n1 as unknown as Record<string, unknown>).unknownNodeField).toBe('kept');
+    expect(
+      (envelope.doc.nodes.n1 as unknown as Record<string, unknown>)
+        .unknownNodeField,
+    ).toBe('kept');
   });
 
   it('warns on invalid app name', () => {
@@ -138,7 +146,9 @@ describe('deserializeDoc', () => {
 
   it('throws on missing doc', () => {
     const json = JSON.stringify({ app: 'vexboard', version: 1 });
-    expect(() => deserializeDoc(json)).toThrow('Missing or invalid "doc" field');
+    expect(() => deserializeDoc(json)).toThrow(
+      'Missing or invalid "doc" field',
+    );
   });
 
   it('throws on invalid JSON', () => {
@@ -173,25 +183,65 @@ describe('serialize — image src field (T-023)', () => {
   it('round-trips a data-URL src', () => {
     const doc = emptyDoc();
     doc.nodes['img'] = {
-      id: 'img', kind: 'image', x: 0, y: 0, w: 100, h: 100,
-      text: '', color: '#fff', tags: [], src: 'data:image/png;base64,AAAA',
+      id: 'img',
+      kind: 'image',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      text: '',
+      color: '#fff',
+      tags: [],
+      src: 'data:image/png;base64,AAAA',
     };
     doc.order = ['img'];
     const json = serializeDoc(doc);
     const back = deserializeDoc(json);
-    expect(back.envelope.doc.nodes['img']!.src).toBe('data:image/png;base64,AAAA');
+    expect(back.envelope.doc.nodes['img']!.src).toBe(
+      'data:image/png;base64,AAAA',
+    );
     expect(back.warnings).toEqual([]);
   });
 
   it('coerceDoc preserves a string src and drops a non-string one', () => {
     const good = coerceDoc({
-      nodes: { a: { id: 'a', kind: 'image', x: 0, y: 0, w: 10, h: 10, text: '', color: '#fff', tags: [], src: 'data:x' } },
-      edges: {}, groups: {}, order: ['a'],
+      nodes: {
+        a: {
+          id: 'a',
+          kind: 'image',
+          x: 0,
+          y: 0,
+          w: 10,
+          h: 10,
+          text: '',
+          color: '#fff',
+          tags: [],
+          src: 'data:x',
+        },
+      },
+      edges: {},
+      groups: {},
+      order: ['a'],
     });
     expect(good.nodes['a']!.src).toBe('data:x');
     const bad = coerceDoc({
-      nodes: { a: { id: 'a', kind: 'image', x: 0, y: 0, w: 10, h: 10, text: '', color: '#fff', tags: [], src: 7 } },
-      edges: {}, groups: {}, order: ['a'],
+      nodes: {
+        a: {
+          id: 'a',
+          kind: 'image',
+          x: 0,
+          y: 0,
+          w: 10,
+          h: 10,
+          text: '',
+          color: '#fff',
+          tags: [],
+          src: 7,
+        },
+      },
+      edges: {},
+      groups: {},
+      order: ['a'],
     });
     expect(bad.nodes['a']!.src).toBeUndefined();
   });
@@ -381,7 +431,15 @@ describe('serialize — kanban columns (T-035, M9)', () => {
   function docWithColumn(withCard = false) {
     const doc = emptyDoc();
     doc.groups = {
-      c1: { id: 'c1', name: 'To Do', role: 'kanban', x: -400, y: -200, w: 240, h: 400 },
+      c1: {
+        id: 'c1',
+        name: 'To Do',
+        role: 'kanban',
+        x: -400,
+        y: -200,
+        w: 240,
+        h: 400,
+      },
     };
     if (withCard) {
       doc.nodes['n1'] = {
@@ -425,7 +483,9 @@ describe('serialize — kanban columns (T-035, M9)', () => {
     const doc = docWithColumn();
     doc.groups.c1!.x = NaN;
     const back = deserializeDoc(serializeDoc(doc));
-    expect(back.warnings.some((w) => w.includes('bad-group-geometry:'))).toBe(true);
+    expect(back.warnings.some((w) => w.includes('bad-group-geometry:'))).toBe(
+      true,
+    );
     // The data is preserved as well as JSON can (NaN canonicalises to null,
     // which still fails the finite check → the warning fires, I-08).
     expect(back.envelope.doc.groups.c1!.x).toBeNull();
@@ -449,5 +509,30 @@ describe('serialize — kanban columns (T-035, M9)', () => {
     const fixed = coerceDoc(bad);
     expect(fixed.groups.c1).toEqual({ id: 'c1', name: 'To Do' });
     expect(validateDoc(fixed)).toEqual([]);
+  });
+
+  it('a collapsed column round-trips with no warnings (T-039, no version bump)', () => {
+    const doc = docWithColumn(true);
+    doc.groups.c1!.collapsed = true;
+    const back = deserializeDoc(serializeDoc(doc));
+    expect(back.warnings).toEqual([]);
+    expect(back.envelope.doc.groups.c1!.collapsed).toBe(true);
+  });
+
+  it('coerceDoc preserves collapsed only when true — false is the absent default', () => {
+    const collapsed = docWithColumn();
+    collapsed.groups.c1!.collapsed = true;
+    expect(coerceDoc(collapsed).groups.c1!.collapsed).toBe(true);
+    const expanded = docWithColumn();
+    expanded.groups.c1!.collapsed = false; // a hand-built legacy value
+    const fixed = coerceDoc(expanded);
+    expect(fixed.groups.c1).not.toHaveProperty('collapsed');
+    expect(validateDoc(fixed)).toEqual([]);
+    // A collapsed column demoted to a plain group (invalid geometry) loses
+    // the flag with the role — a plain frame may not carry it.
+    const demoted = docWithColumn();
+    demoted.groups.c1!.collapsed = true;
+    delete demoted.groups.c1!.x;
+    expect(coerceDoc(demoted).groups.c1).toEqual({ id: 'c1', name: 'To Do' });
   });
 });
